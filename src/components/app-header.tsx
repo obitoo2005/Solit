@@ -10,6 +10,7 @@ import { ClusterUiSelect } from './cluster/cluster-ui'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { useProfiles } from '@/components/profile/profile-context'
 import { ProfileDialog } from '@/components/profile/profile-dialog'
+import { NotificationsBell } from '@/components/notifications/notifications-bell'
 
 export function AppHeader({ links = [] }: { links: { label: string; path: string }[] }) {
   const pathname = usePathname()
@@ -65,6 +66,7 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
 
         {/* Right cluster */}
         <div className="hidden md:flex items-center gap-2">
+          <NotificationsBell />
           {profileChip}
           <WalletButton />
         </div>

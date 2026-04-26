@@ -1,0 +1,37 @@
+feat: emoji tags, comments, notifications + realtime, recurring expenses
+
+Schema v6
+- expenses.emoji
+- expense_comments table (+ RLS)
+- notifications table (+ RLS, realtime publication)
+- recurring_expenses table (+ RLS)
+- enabled realtime on notifications/comments/expenses/settlements
+
+Emoji tags
+- New EmojiPicker (curated 24 categories) wired into Add Expense + Recurring dialogs
+- Emoji rendered in activity rows + recurring panel rows
+
+Comments
+- listComments / addComment / deleteComment / countCommentsForGroup helpers
+- Inline expandable thread per expense (animated height) with author chip + delete
+- Per-row comment count badge on the chat-bubble icon
+- countCommentsForGroup batched in main page fetch
+
+Notifications + Realtime
+- Notification type + listNotifications / markRead / markAllRead / createNotification / notifyGroup helpers
+- Bell icon in header with unread badge + dropdown panel
+- Supabase Realtime subscription per wallet: live-prepends new notifications + toasts them
+- Settlement, expense_added, comment events fire fan-out automatically (best-effort)
+- friendlyError + logError for clean Supabase error reporting
+
+Recurring expenses
+- RecurringExpense type + helpers: list, listDue, create, delete, runDueRecurring, advanceDate
+- materialize-on-open pattern: due templates surfaced as banner with "Run now" button
+- Atomic per-template: insert expense -> bump next_run_at by 1 frequency unit
+- New RecurringDialog (description, payer, amount, weekly/monthly, emoji)
+- RecurringPanel mounted between Settle Up and Activity
+- Highlights due rows in amber
+
+Errors infra
+- New lib/errors.ts: friendlyError + logError that handle Supabase PostgrestError properly
+- Applied in addExpense flow so empty {} console errors are gone

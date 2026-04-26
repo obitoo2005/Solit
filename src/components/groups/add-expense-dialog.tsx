@@ -11,6 +11,8 @@ import { Camera, X as XIcon } from 'lucide-react'
 import { addExpense, uploadReceipt, type GroupMember } from '@/lib/groups'
 import { formatCents } from '@/lib/solana/usdc'
 import { useProfiles } from '@/components/profile/profile-context'
+import { friendlyError, logError } from '@/lib/errors'
+import { EmojiPicker } from '@/components/groups/emoji-picker'
 
 type Props = {
   open: boolean
@@ -30,6 +32,7 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
   const [payerWallet, setPayerWallet] = useState<string>('')
   const [splitMode, setSplitMode] = useState<SplitMode>('equal')
   const [shares, setShares] = useState<Record<string, string>>({})
+  const [emoji, setEmoji] = useState<string | null>(null)
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
   const [uploadingReceipt, setUploadingReceipt] = useState(false)
@@ -40,6 +43,7 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
     if (!open) return
     setShares({})
     setSplitMode('equal')
+    setEmoji(null)
     setReceiptFile(null)
     setReceiptPreview(null)
     setUploadingReceipt(false)
@@ -169,13 +173,14 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
         description: trimmedDesc,
         splits: splitsArg,
         receiptUrl,
+        emoji,
       })
       toast.success('Expense added')
       reset()
       onAdded()
     } catch (err) {
-      console.error(err)
-      toast.error(err instanceof Error ? err.message : 'Failed to add expense')
+      logError('addExpense failed', err)
+      toast.error(friendlyError(err, 'Failed to add expense'))
       setSubmitting(false)
     }
   }
@@ -211,13 +216,18 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="expense-desc">What was it?</Label>
-            <Input
-              id="expense-desc"
-              placeholder="Dinner, Uber, hotel..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              autoFocus
-            />
+            <div className="flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <Input
+                  id="expense-desc"
+                  placeholder="Dinner, Uber, hotel..."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <EmojiPicker value={emoji} onChange={setEmoji} disabled={submitting} />
+            </div>
           </div>
 
           <div className="space-y-2">

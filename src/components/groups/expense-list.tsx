@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Pencil, Trash2, Check, X } from 'lucide-react'
+import { Pencil, Trash2, Check, X, MessageSquare } from 'lucide-react'
 import { toast } from 'sonner'
+import { AnimatePresence, motion } from 'framer-motion'
 import { formatCents } from '@/lib/solana/usdc'
 import { formatSol } from '@/lib/price'
 import {
@@ -13,12 +14,15 @@ import {
   deleteExpense,
 } from '@/lib/groups'
 import { useProfiles } from '@/components/profile/profile-context'
+import { CommentsThread } from '@/components/groups/comments-thread'
 
 type Props = {
   expenses: Expense[]
   settlements: Settlement[]
   members: GroupMember[]
   myWallet?: string
+  /** Map of expense_id -> comment count, for badge display. */
+  commentCounts?: Record<string, number>
   onChanged?: () => void
 }
 
@@ -26,11 +30,25 @@ type Activity =
   | { kind: 'expense'; data: Expense }
   | { kind: 'settlement'; data: Settlement }
 
-export function ExpenseList({ expenses, settlements, members, myWallet, onChanged }: Props) {
+export function ExpenseList({
+  expenses,
+  settlements,
+  members,
+  myWallet,
+  commentCounts,
+  onChanged,
+}: Props) {
   const { resolveName } = useProfiles()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [localCounts, setLocalCounts] = useState<Record<string, number>>({})
+
+  const getCommentCount = (expenseId: string): number => {
+    if (expenseId in localCounts) return localCounts[expenseId]
+    return commentCounts?.[expenseId] ?? 0
+  }
 
   const memberNames = new Map<string, string>()
   for (const m of members) {
@@ -95,8 +113,11 @@ export function ExpenseList({ expenses, settlements, members, myWallet, onChange
           const e = item.data
           const canEdit = !!myWallet && e.payer_wallet === myWallet
           const isEditing = editingId === e.id
+          const commentCount = getCommentCount(e.id)
+          const isExpanded = expandedId === e.id
           return (
-            <li key={`e-${e.id}`} className="group flex items-center justify-between px-5 py-3.5 gap-3">
+            <li key={`e-${e.id}`} className="group flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3.5 gap-3">
               {!isEditing && e.receipt_url && (
                 <a
                   href={e.receipt_url}
@@ -144,7 +165,14 @@ export function ExpenseList({ expenses, settlements, members, myWallet, onChange
                   </div>
                 ) : (
                   <>
-                    <p className="font-medium truncate">{e.description}</p>
+                    <p className="font-medium truncate flex items-center gap-2">
+                      {e.emoji && (
+                        <span className="text-lg leading-none shrink-0" aria-hidden>
+                          {e.emoji}
+                        </span>
+                      )}
+                      <span className="truncate">{e.description}</span>
+                    </p>
                     <p className="mt-0.5 font-mono-tight text-[11px] uppercase tracking-wider text-muted-foreground">
                       Paid by {memberNames.get(e.payer_wallet) ?? resolveName(e.payer_wallet)} ·{' '}
                       {new Date(e.created_at).toLocaleDateString()}
@@ -180,9 +208,43 @@ export function ExpenseList({ expenses, settlements, members, myWallet, onChange
                       </button>
                     </div>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(isExpanded ? null : e.id)}
+                    className={`inline-flex items-center gap-1 rounded-md px-1.5 py-1 transition-colors ${
+                      isExpanded || commentCount > 0
+                        ? 'text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    title={isExpanded ? 'Hide comments' : 'Show comments'}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    {commentCount > 0 && (
+                      <span className="font-mono-tight tabular-nums text-[11px]">{commentCount}</span>
+                    )}
+                  </button>
                   <span className="font-mono-tight tabular-nums text-sm">{formatCents(e.amount_cents)}</span>
                 </div>
               )}
+            </div>
+            <AnimatePresence initial={false}>
+              {isExpanded && (
+                <motion.div
+                  key="thread"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
+                  className="overflow-hidden"
+                >
+                  <CommentsThread
+                    expenseId={e.id}
+                    myWallet={myWallet}
+                    onCountChange={(n) => setLocalCounts((prev) => ({ ...prev, [e.id]: n }))}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
             </li>
           )
         }

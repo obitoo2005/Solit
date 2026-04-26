@@ -23,6 +23,7 @@ export type Expense = {
   amount_cents: number
   description: string
   receipt_url: string | null
+  emoji: string | null
   created_at: string
 }
 
@@ -149,6 +150,8 @@ export async function addExpense(input: {
   splits?: Record<string, number>
   /** Optional public URL of the uploaded receipt photo. */
   receiptUrl?: string | null
+  /** Optional emoji / category tag (single emoji char or short label). */
+  emoji?: string | null
 }): Promise<Expense> {
   const { data, error } = await supabase
     .from('expenses')
@@ -158,6 +161,7 @@ export async function addExpense(input: {
       amount_cents: input.amountCents,
       description: input.description,
       receipt_url: input.receiptUrl ?? null,
+      emoji: input.emoji ?? null,
     })
     .select()
     .single()
@@ -174,8 +178,23 @@ export async function addExpense(input: {
       share_cents,
     }))
     const { error: splitErr } = await supabase.from('expense_splits').insert(rows)
-    if (splitErr) throw splitErr
+    if (splitErr) {
+      // Roll back the expense if splits fail to insert.
+      await supabase.from('expenses').delete().eq('id', data.id)
+      throw splitErr
+    }
   }
+
+  // Notify every other group member — best-effort
+  const usd = (input.amountCents / 100).toFixed(2)
+  notifyGroup({
+    groupId: input.groupId,
+    actorWallet: input.payerWallet,
+    kind: 'expense_added',
+    title: `${input.emoji ? input.emoji + ' ' : ''}New expense: $${usd}`,
+    body: input.description,
+    link: `/groups/${input.groupId}`,
+  })
 
   return data as Expense
 }
@@ -220,6 +239,23 @@ export async function recordSettlement(input: {
     .select()
     .single()
   if (error || !data) throw error ?? new Error('Failed to record settlement')
+
+  // Notify recipient — best-effort
+  try {
+    const usd = (input.amountCents / 100).toFixed(2)
+    const asset = input.asset ?? 'USDC'
+    await createNotification({
+      recipientWallet: input.toWallet,
+      groupId: input.groupId,
+      kind: 'settlement',
+      title: `You received $${usd} in ${asset}`,
+      body: `From ${input.fromWallet.slice(0, 4)}…${input.fromWallet.slice(-4)}`,
+      link: `/groups/${input.groupId}`,
+    })
+  } catch (notifErr) {
+    console.error('settlement notification failed', notifErr)
+  }
+
   return data as Settlement
 }
 
@@ -417,6 +453,180 @@ export async function deleteExpense(expenseId: string): Promise<void> {
   if (error) throw error
 }
 
+/* ---------- Comments on expenses ---------- */
+
+export type ExpenseComment = {
+  id: string
+  expense_id: string
+  author_wallet: string
+  body: string
+  created_at: string
+}
+
+export async function listComments(expenseId: string): Promise<ExpenseComment[]> {
+  const { data, error } = await supabase
+    .from('expense_comments')
+    .select('*')
+    .eq('expense_id', expenseId)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as ExpenseComment[]
+}
+
+export async function addComment(input: {
+  expenseId: string
+  authorWallet: string
+  body: string
+}): Promise<ExpenseComment> {
+  const trimmed = input.body.trim()
+  if (!trimmed) throw new Error('Comment cannot be empty')
+  if (trimmed.length > 500) throw new Error('Comment is too long (max 500 chars)')
+  const { data, error } = await supabase
+    .from('expense_comments')
+    .insert({
+      expense_id: input.expenseId,
+      author_wallet: input.authorWallet,
+      body: trimmed,
+    })
+    .select()
+    .single()
+  if (error || !data) throw error ?? new Error('Failed to add comment')
+
+  // Notify the expense payer (if it's not the commenter themselves) — best-effort
+  try {
+    const { data: exp } = await supabase
+      .from('expenses')
+      .select('payer_wallet, group_id, description')
+      .eq('id', input.expenseId)
+      .single()
+    if (exp && exp.payer_wallet && exp.payer_wallet !== input.authorWallet) {
+      await createNotification({
+        recipientWallet: exp.payer_wallet,
+        groupId: exp.group_id,
+        kind: 'comment',
+        title: 'New comment on your expense',
+        body: `"${trimmed.slice(0, 80)}${trimmed.length > 80 ? '…' : ''}" — on ${exp.description}`,
+        link: `/groups/${exp.group_id}`,
+      })
+    }
+  } catch (notifErr) {
+    console.error('comment notification failed', notifErr)
+  }
+
+  return data as ExpenseComment
+}
+
+export async function deleteComment(commentId: string): Promise<void> {
+  const { error } = await supabase.from('expense_comments').delete().eq('id', commentId)
+  if (error) throw error
+}
+
+export async function countCommentsForGroup(groupId: string): Promise<Record<string, number>> {
+  // Returns a map of expense_id -> comment_count for all expenses in the group.
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('id, expense_comments(id)')
+    .eq('group_id', groupId)
+  if (error) throw error
+  const out: Record<string, number> = {}
+  for (const row of (data as { id: string; expense_comments: { id: string }[] | null }[]) ?? []) {
+    out[row.id] = row.expense_comments?.length ?? 0
+  }
+  return out
+}
+
+/* ---------- Notifications ---------- */
+
+export type Notification = {
+  id: string
+  recipient_wallet: string
+  group_id: string | null
+  kind: string
+  title: string
+  body: string | null
+  link: string | null
+  read_at: string | null
+  created_at: string
+}
+
+export async function listNotifications(wallet: string, limit = 30): Promise<Notification[]> {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('recipient_wallet', wallet)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? []) as Notification[]
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function markAllNotificationsRead(wallet: string): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('recipient_wallet', wallet)
+    .is('read_at', null)
+  if (error) throw error
+}
+
+export async function createNotification(input: {
+  recipientWallet: string
+  groupId?: string | null
+  kind: string
+  title: string
+  body?: string | null
+  link?: string | null
+}): Promise<void> {
+  const { error } = await supabase.from('notifications').insert({
+    recipient_wallet: input.recipientWallet,
+    group_id: input.groupId ?? null,
+    kind: input.kind,
+    title: input.title,
+    body: input.body ?? null,
+    link: input.link ?? null,
+  })
+  if (error) throw error
+}
+
+/**
+ * Fan out a notification to every group member except the actor.
+ * Best-effort: failures are logged but don't throw.
+ */
+export async function notifyGroup(input: {
+  groupId: string
+  actorWallet: string
+  kind: string
+  title: string
+  body?: string
+  link?: string
+}): Promise<void> {
+  try {
+    const members = await listMembers(input.groupId)
+    const recipients = members.map((m) => m.wallet).filter((w) => w !== input.actorWallet)
+    if (recipients.length === 0) return
+    const rows = recipients.map((r) => ({
+      recipient_wallet: r,
+      group_id: input.groupId,
+      kind: input.kind,
+      title: input.title,
+      body: input.body ?? null,
+      link: input.link ?? null,
+    }))
+    const { error } = await supabase.from('notifications').insert(rows)
+    if (error) console.error('notifyGroup insert failed', error)
+  } catch (err) {
+    console.error('notifyGroup failed', err)
+  }
+}
+
 /* ---------- Receipt photos ---------- */
 
 const RECEIPTS_BUCKET = 'receipts'
@@ -448,6 +658,122 @@ export async function uploadReceipt(args: {
 export async function updateExpenseReceipt(expenseId: string, receiptUrl: string | null): Promise<void> {
   const { error } = await supabase.from('expenses').update({ receipt_url: receiptUrl }).eq('id', expenseId)
   if (error) throw error
+}
+
+/* ---------- Recurring expenses ---------- */
+
+export type RecurringFrequency = 'weekly' | 'monthly'
+
+export type RecurringExpense = {
+  id: string
+  group_id: string
+  payer_wallet: string
+  amount_cents: number
+  description: string
+  emoji: string | null
+  frequency: RecurringFrequency
+  next_run_at: string
+  splits: Record<string, number> | null
+  created_at: string
+}
+
+export async function listRecurring(groupId: string): Promise<RecurringExpense[]> {
+  const { data, error } = await supabase
+    .from('recurring_expenses')
+    .select('*')
+    .eq('group_id', groupId)
+    .order('next_run_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as RecurringExpense[]
+}
+
+export async function listDueRecurring(groupId: string): Promise<RecurringExpense[]> {
+  const { data, error } = await supabase
+    .from('recurring_expenses')
+    .select('*')
+    .eq('group_id', groupId)
+    .lte('next_run_at', new Date().toISOString())
+    .order('next_run_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as RecurringExpense[]
+}
+
+export async function createRecurring(input: {
+  groupId: string
+  payerWallet: string
+  amountCents: number
+  description: string
+  emoji?: string | null
+  frequency: RecurringFrequency
+  /** First run timestamp (ISO). If omitted, uses now + frequency. */
+  nextRunAt?: string
+  splits?: Record<string, number> | null
+}): Promise<RecurringExpense> {
+  const next = input.nextRunAt ?? advanceDate(new Date().toISOString(), input.frequency)
+  const { data, error } = await supabase
+    .from('recurring_expenses')
+    .insert({
+      group_id: input.groupId,
+      payer_wallet: input.payerWallet,
+      amount_cents: input.amountCents,
+      description: input.description,
+      emoji: input.emoji ?? null,
+      frequency: input.frequency,
+      next_run_at: next,
+      splits: input.splits ?? null,
+    })
+    .select()
+    .single()
+  if (error || !data) throw error ?? new Error('Failed to create recurring')
+  return data as RecurringExpense
+}
+
+export async function deleteRecurring(id: string): Promise<void> {
+  const { error } = await supabase.from('recurring_expenses').delete().eq('id', id)
+  if (error) throw error
+}
+
+/** Advance an ISO date string by 1 frequency unit. */
+function advanceDate(iso: string, freq: RecurringFrequency): string {
+  const d = new Date(iso)
+  if (freq === 'weekly') d.setDate(d.getDate() + 7)
+  else d.setMonth(d.getMonth() + 1)
+  return d.toISOString()
+}
+
+/**
+ * Materialize all currently-due recurring expenses for a group:
+ * 1. Insert each as a real expense (+ splits if any)
+ * 2. Advance the template's next_run_at by one frequency
+ *
+ * Returns the count of materialized expenses.
+ */
+export async function runDueRecurring(groupId: string): Promise<number> {
+  const due = await listDueRecurring(groupId)
+  if (due.length === 0) return 0
+
+  let count = 0
+  for (const r of due) {
+    try {
+      await addExpense({
+        groupId: r.group_id,
+        payerWallet: r.payer_wallet,
+        amountCents: r.amount_cents,
+        description: r.description,
+        emoji: r.emoji,
+        splits: r.splits ?? undefined,
+      })
+      const newNext = advanceDate(r.next_run_at, r.frequency)
+      await supabase
+        .from('recurring_expenses')
+        .update({ next_run_at: newNext })
+        .eq('id', r.id)
+      count++
+    } catch (err) {
+      console.error(`runDueRecurring: failed for ${r.id}`, err)
+    }
+  }
+  return count
 }
 
 /* ---------- Self-leave ---------- */

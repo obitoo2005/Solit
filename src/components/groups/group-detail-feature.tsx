@@ -18,6 +18,7 @@ import {
   computeSettlementPlan,
   groupSplits,
   leaveGroup,
+  countCommentsForGroup,
   type Group,
   type GroupMember,
   type Expense,
@@ -28,6 +29,7 @@ import { AddExpenseDialog } from '@/components/groups/add-expense-dialog'
 import { SettleUpButton } from '@/components/groups/settle-up-button'
 import { SettleAllButton } from '@/components/groups/settle-all-button'
 import { ExpenseList } from '@/components/groups/expense-list'
+import { RecurringPanel } from '@/components/groups/recurring-panel'
 import { BalancesPanel } from '@/components/groups/balances-panel'
 import { GroupSettingsDialog } from '@/components/groups/group-settings-dialog'
 import { WalletButton } from '@/components/solana/solana-provider'
@@ -43,6 +45,7 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [settlements, setSettlements] = useState<Settlement[]>([])
   const [splits, setSplits] = useState<ExpenseSplit[]>([])
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -50,18 +53,20 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [g, m, e, s, sp] = await Promise.all([
+      const [g, m, e, s, sp, cc] = await Promise.all([
         getGroup(groupId),
         listMembers(groupId),
         listExpenses(groupId),
         listSettlements(groupId),
         listExpenseSplits(groupId),
+        countCommentsForGroup(groupId).catch(() => ({}) as Record<string, number>),
       ])
       setGroup(g)
       setMembers(m)
       setExpenses(e)
       setSettlements(s)
       setSplits(sp)
+      setCommentCounts(cc)
       // Eagerly resolve display names for everyone the page might mention
       const wallets = new Set<string>()
       m.forEach((member) => wallets.add(member.wallet))
@@ -278,6 +283,10 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
           </div>
         </div>
 
+        <div className="mt-10">
+          <RecurringPanel groupId={group.id} members={members} onChanged={refresh} />
+        </div>
+
         <div className="mt-12">
           <div className="flex items-baseline justify-between mb-4">
             <h2 className="font-display text-2xl">Activity</h2>
@@ -290,6 +299,7 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
             settlements={settlements}
             members={members}
             myWallet={myWallet}
+            commentCounts={commentCounts}
             onChanged={refresh}
           />
         </div>
