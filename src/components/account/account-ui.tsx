@@ -2,7 +2,7 @@
 
 import { useWallet } from '@solana/wallet-adapter-react'
 import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
-import { RefreshCw, AlertCircle, X } from 'lucide-react'
+import { RefreshCw, AlertCircle, X, Check, Copy, ExternalLink } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -307,10 +307,54 @@ function BalanceSol({ balance }: { balance: number }) {
 }
 
 function ModalReceive({ address }: { address: PublicKey }) {
+  const { getExplorerUrl } = useCluster()
+  const addr = address.toString()
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(addr)
+      setCopied(true)
+      toast.success('Address copied')
+      setTimeout(() => setCopied(false), 2000)
+    } catch (e) {
+      console.error(e)
+      toast.error('Could not copy — long-press the address to copy manually')
+    }
+  }
+
   return (
     <AppModal title="Receive">
-      <p>Receive assets by sending them to your public key:</p>
-      <code>{address.toString()}</code>
+      <p className="text-sm text-muted-foreground">
+        Send SOL or any SPL token to this address. It belongs to your connected wallet.
+      </p>
+      <div className="rounded-lg border border-foreground/10 bg-muted/40 p-3 break-all font-mono text-xs select-all">
+        {addr}
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Button
+          variant="default"
+          onClick={handleCopy}
+          className="flex-1 inline-flex items-center justify-center gap-2"
+        >
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          {copied ? 'Copied' : 'Copy address'}
+        </Button>
+        <Button
+          variant="outline"
+          asChild
+          className="flex-1 inline-flex items-center justify-center gap-2"
+        >
+          <a
+            href={getExplorerUrl(`account/${addr}`)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink className="h-4 w-4" />
+            View on Solscan
+          </a>
+        </Button>
+      </div>
     </AppModal>
   )
 }
@@ -326,7 +370,7 @@ function ModalAirdrop({ address }: { address: PublicKey }) {
       submitLabel="Request Airdrop"
       submit={() => mutation.mutateAsync(parseFloat(amount))}
     >
-      <Label htmlFor="amount">Amount</Label>
+      <Label htmlFor="amount">Amount (SOL)</Label>
       <Input
         disabled={mutation.isPending}
         id="amount"
@@ -343,46 +387,104 @@ function ModalAirdrop({ address }: { address: PublicKey }) {
 
 function ModalSend({ address }: { address: PublicKey }) {
   const wallet = useWallet()
+  const balanceQuery = useGetBalance({ address })
   const mutation = useTransferSol({ address })
   const [destination, setDestination] = useState('')
-  const [amount, setAmount] = useState('1')
+  const [amount, setAmount] = useState('')
 
   if (!address || !wallet.sendTransaction) {
     return <div>Wallet not connected</div>
   }
 
+  const destError = (() => {
+    if (!destination) return null
+    try {
+      new PublicKey(destination)
+      return null
+    } catch {
+      return 'Not a valid Solana address'
+    }
+  })()
+
+  const balanceSol = balanceQuery.data != null ? balanceQuery.data / LAMPORTS_PER_SOL : null
+  const amountNum = parseFloat(amount)
+  const amountInvalid = !amount || isNaN(amountNum) || amountNum <= 0
+  const amountOverBalance =
+    balanceSol != null && !isNaN(amountNum) && amountNum > balanceSol - 0.0001
+
+  function handleMax() {
+    if (balanceSol == null) return
+    const usable = Math.max(0, balanceSol - 0.0001)
+    setAmount(usable.toFixed(6).replace(/\.?0+$/, ''))
+  }
+
   return (
     <AppModal
       title="Send"
-      submitDisabled={!destination || !amount || mutation.isPending}
-      submitLabel="Send"
+      submitDisabled={
+        !destination || !!destError || amountInvalid || amountOverBalance || mutation.isPending
+      }
+      submitLabel={mutation.isPending ? 'Sending\u2026' : 'Send SOL'}
       submit={() => {
-        mutation.mutateAsync({
-          destination: new PublicKey(destination),
-          amount: parseFloat(amount),
-        })
+        try {
+          mutation.mutateAsync({
+            destination: new PublicKey(destination),
+            amount: amountNum,
+          })
+        } catch (e) {
+          console.error(e)
+          toast.error('Invalid destination address')
+        }
       }}
     >
-      <Label htmlFor="destination">Destination</Label>
-      <Input
-        disabled={mutation.isPending}
-        id="destination"
-        onChange={(e) => setDestination(e.target.value)}
-        placeholder="Destination"
-        type="text"
-        value={destination}
-      />
-      <Label htmlFor="amount">Amount</Label>
-      <Input
-        disabled={mutation.isPending}
-        id="amount"
-        min="1"
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder="Amount"
-        step="any"
-        type="number"
-        value={amount}
-      />
+      <div className="space-y-1.5">
+        <Label htmlFor="destination">Destination</Label>
+        <Input
+          disabled={mutation.isPending}
+          id="destination"
+          onChange={(e) => setDestination(e.target.value)}
+          placeholder="Recipient's Solana address"
+          type="text"
+          value={destination}
+          className={destError ? 'border-rose-500 focus-visible:ring-rose-500' : undefined}
+        />
+        {destError && <p className="text-xs text-rose-500">{destError}</p>}
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <Label htmlFor="amount">Amount (SOL)</Label>
+          <button
+            type="button"
+            onClick={handleMax}
+            disabled={balanceSol == null || mutation.isPending}
+            className="text-xs font-mono-tight text-muted-foreground hover:text-foreground transition disabled:opacity-50"
+          >
+            Max
+          </button>
+        </div>
+        <Input
+          disabled={mutation.isPending}
+          id="amount"
+          min="0"
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+          type="number"
+          step="any"
+          value={amount}
+          className={amountOverBalance ? 'border-rose-500 focus-visible:ring-rose-500' : undefined}
+        />
+        <p className="text-xs text-muted-foreground">
+          {balanceSol != null ? (
+            <>
+              Available: <span className="font-mono-tight tabular-nums">{balanceSol.toFixed(4)} SOL</span>
+              {amountOverBalance && <span className="ml-2 text-rose-500">Exceeds balance</span>}
+            </>
+          ) : (
+            'Loading balance\u2026'
+          )}
+        </p>
+      </div>
     </AppModal>
   )
 }

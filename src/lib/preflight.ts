@@ -129,14 +129,67 @@ export async function checkSettlePreflight(args: {
 }
 
 /**
- * Surface a preflight failure as a sonner toast with an actionable button
- * (open the relevant faucet) when available.
- *
- * Use right before bailing out of a settle handler:
- *   const pre = await checkSettlePreflight(...)
- *   if (!pre.ok) { showPreflightFailure(pre); return }
+ * Request a devnet SOL airdrop directly from the connected RPC, with toast UX.
+ * Confirms the tx before resolving so the user knows when their balance updated.
  */
-export function showPreflightFailure(result: Extract<PreflightResult, { ok: false }>) {
+export async function requestDevnetAirdrop(args: {
+  connection: Connection
+  wallet: PublicKey
+  amountSol?: number
+}): Promise<void> {
+  const { connection, wallet, amountSol = 1 } = args
+  const toastId = toast.loading(`Requesting ${amountSol} SOL airdrop\u2026`)
+  try {
+    const sig = await connection.requestAirdrop(wallet, amountSol * LAMPORTS_PER_SOL)
+    const latestBlockhash = await connection.getLatestBlockhash('confirmed')
+    await connection.confirmTransaction({ signature: sig, ...latestBlockhash }, 'confirmed')
+    toast.success(`${amountSol} SOL airdropped \u2014 you can settle now`, { id: toastId })
+  } catch (e) {
+    console.error(e)
+    toast.error('Airdrop failed \u2014 devnet rate limit? Try the faucet.', {
+      id: toastId,
+      action: {
+        label: 'Open faucet',
+        onClick: () => window.open('https://faucet.solana.com', '_blank', 'noopener,noreferrer'),
+      },
+    })
+    throw e
+  }
+}
+
+/**
+ * Surface a preflight failure as a sonner toast with an actionable button.
+ *
+ * Behavior of the action button:
+ *  - For SOL-related failures on devnet (no-sol-for-gas, insufficient-sol),
+ *    if `onSolAirdrop` is provided we trigger an in-app airdrop directly so
+ *    the user doesn't have to leave the page.
+ *  - For USDC failures we open Circle's devnet faucet in a new tab, since
+ *    there's no public RPC to mint devnet USDC.
+ *  - On mainnet there's no faucet either way; we just show the message.
+ */
+export function showPreflightFailure(
+  result: Extract<PreflightResult, { ok: false }>,
+  options?: { onSolAirdrop?: () => Promise<void> | void },
+) {
+  const isSolFailure = result.kind === 'no-sol-for-gas' || result.kind === 'insufficient-sol'
+
+  // Prefer the in-app airdrop callback when available for SOL failures.
+  if (isSolFailure && options?.onSolAirdrop) {
+    toast.error(result.message, {
+      description: result.hint,
+      duration: 8000,
+      action: {
+        label: 'Request airdrop',
+        onClick: () => {
+          // fire-and-forget; the airdrop helper has its own toast lifecycle
+          void options.onSolAirdrop?.()
+        },
+      },
+    })
+    return
+  }
+
   toast.error(result.message, {
     description: result.hint,
     duration: 8000,
