@@ -18,6 +18,7 @@ import {
   type GroupMember,
 } from '@/lib/groups'
 import { useProfiles } from '@/components/profile/profile-context'
+import { UserSearchInput } from '@/components/groups/user-search-input'
 
 type Props = {
   open: boolean
@@ -184,10 +185,22 @@ export function GroupSettingsDialog({ open, onOpenChange, group, members, onChan
           <Label htmlFor="add-members" className="font-mono-tight text-[11px] uppercase tracking-wider">
             Add members
           </Label>
+          <UserSearchInput
+            onPick={(p) => {
+              setNewMembers((prev) => {
+                const trimmed = prev.trim()
+                // Avoid duplicate paste if the wallet is already queued
+                if (trimmed.split(/[\s,;\n]+/).includes(p.wallet)) return prev
+                return trimmed ? `${trimmed}\n${p.wallet}` : p.wallet
+              })
+            }}
+            excludeWallets={members.map((m) => m.wallet)}
+            placeholder="Search Solit users by name…"
+          />
           <textarea
             id="add-members"
             className="flex min-h-[80px] w-full rounded-md border border-foreground/15 bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-foreground/30"
-            placeholder="One Solana address per line"
+            placeholder="…or paste Solana addresses, one per line"
             value={newMembers}
             onChange={(e) => setNewMembers(e.target.value)}
           />

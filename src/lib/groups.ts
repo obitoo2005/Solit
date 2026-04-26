@@ -367,6 +367,25 @@ export async function listProfiles(wallets: string[]): Promise<Record<string, Pr
   return out
 }
 
+/**
+ * Search profiles by display name (case-insensitive contains).
+ * Used for the 'add member by name' autocomplete. Returns up to `limit`
+ * profiles ordered by display_name. Strips % so the query can't hijack
+ * the LIKE pattern.
+ */
+export async function searchProfiles(query: string, limit = 8): Promise<Profile[]> {
+  const q = query.trim().replace(/[%_]/g, '')
+  if (q.length < 1) return []
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .ilike('display_name', `%${q}%`)
+    .order('display_name', { ascending: true })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? []) as Profile[]
+}
+
 export async function upsertProfile(input: { wallet: string; displayName: string }): Promise<Profile> {
   const display_name = input.displayName.trim()
   if (!display_name) throw new Error('Display name cannot be empty')

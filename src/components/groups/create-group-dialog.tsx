@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createGroup, type Group } from '@/lib/groups'
+import { UserSearchInput } from '@/components/groups/user-search-input'
 
 type Props = {
   open: boolean
@@ -96,15 +97,26 @@ export function CreateGroupDialog({ open, onOpenChange, onCreated }: Props) {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="member-wallets">Member wallet addresses</Label>
+            <Label htmlFor="member-wallets">Add members</Label>
+            <UserSearchInput
+              onPick={(p) => {
+                setMemberInput((prev) => {
+                  const trimmed = prev.trim()
+                  if (trimmed.split(/[\s,;\n]+/).includes(p.wallet)) return prev
+                  return trimmed ? `${trimmed}\n${p.wallet}` : p.wallet
+                })
+              }}
+              excludeWallets={publicKey ? [publicKey.toBase58()] : []}
+              placeholder="Search Solit users by name…"
+            />
             <textarea
               id="member-wallets"
-              className="flex min-h-[100px] w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
-              placeholder="One Solana address per line. You'll be added automatically."
+              className="flex min-h-[80px] w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+              placeholder="…or paste Solana addresses, one per line"
               value={memberInput}
               onChange={(e) => setMemberInput(e.target.value)}
             />
-            <p className="text-xs text-neutral-500">Optional — you can add members later.</p>
+            <p className="text-xs text-neutral-500">Optional — you'll be added automatically. You can add more later.</p>
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>
