@@ -13,6 +13,7 @@ import { buildBulkSolTransferTx } from '@/lib/solana/sol'
 import { centsToLamports, formatSol, getSolUsdPrice } from '@/lib/price'
 import { recordSettlement, type SettlementAsset } from '@/lib/groups'
 import { APPLE_SPRING } from '@/components/motion'
+import { checkSettlePreflight, showPreflightFailure } from '@/lib/preflight'
 
 type Transfer = { from: string; to: string; amountCents: number }
 
@@ -75,6 +76,23 @@ export function SettleAllButton({ groupId, myWallet, myDebts, onSettled }: Props
           return
         }
         perTransferBaseUnits = myDebts.map((t) => centsToLamports(t.amountCents, solPrice))
+        const totalLamports = perTransferBaseUnits.reduce((acc, n) => acc + n, 0n)
+
+        // Pre-flight: enough SOL for the bundled total + gas?
+        const pre = await checkSettlePreflight({
+          connection,
+          wallet: publicKey,
+          cluster: cluster.network ?? 'devnet',
+          asset: 'SOL',
+          amountCents: totalCents,
+          amountLamports: totalLamports,
+          isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
+        })
+        if (!pre.ok) {
+          showPreflightFailure(pre)
+          return
+        }
+
         const tx = await buildBulkSolTransferTx({
           connection,
           fromWallet: publicKey,
@@ -87,6 +105,21 @@ export function SettleAllButton({ groupId, myWallet, myDebts, onSettled }: Props
         sig = await sendTransaction(tx, connection)
       } else {
         perTransferBaseUnits = myDebts.map((t) => centsToUsdcBaseUnits(t.amountCents))
+
+        // Pre-flight: enough USDC for the total + a tiny bit of SOL for gas?
+        const pre = await checkSettlePreflight({
+          connection,
+          wallet: publicKey,
+          cluster: cluster.network ?? 'devnet',
+          asset: 'USDC',
+          amountCents: totalCents,
+          isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
+        })
+        if (!pre.ok) {
+          showPreflightFailure(pre)
+          return
+        }
+
         const tx = await buildBulkUsdcTransferTx({
           connection,
           fromWallet: publicKey,

@@ -13,6 +13,7 @@ import { centsToLamports, formatSol, getSolUsdPrice } from '@/lib/price'
 import { recordSettlement, type GroupMember, type SettlementAsset } from '@/lib/groups'
 import { APPLE_SPRING } from '@/components/motion'
 import { useProfiles } from '@/components/profile/profile-context'
+import { checkSettlePreflight, showPreflightFailure } from '@/lib/preflight'
 
 type Props = {
   groupId: string
@@ -79,6 +80,22 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
           return
         }
         assetAmountBaseUnits = centsToLamports(transfer.amountCents, solPrice)
+
+        // Pre-flight: do we have enough SOL for the amount + gas?
+        const pre = await checkSettlePreflight({
+          connection,
+          wallet: publicKey,
+          cluster: cluster.network ?? 'devnet',
+          asset: 'SOL',
+          amountCents: transfer.amountCents,
+          amountLamports: assetAmountBaseUnits,
+          isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
+        })
+        if (!pre.ok) {
+          showPreflightFailure(pre)
+          return
+        }
+
         const tx = await buildSolTransferTx({
           connection,
           fromWallet: publicKey,
@@ -89,6 +106,21 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
         sig = await sendTransaction(tx, connection)
       } else {
         assetAmountBaseUnits = centsToUsdcBaseUnits(transfer.amountCents)
+
+        // Pre-flight: USDC for the amount + a tiny bit of SOL for gas?
+        const pre = await checkSettlePreflight({
+          connection,
+          wallet: publicKey,
+          cluster: cluster.network ?? 'devnet',
+          asset: 'USDC',
+          amountCents: transfer.amountCents,
+          isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
+        })
+        if (!pre.ok) {
+          showPreflightFailure(pre)
+          return
+        }
+
         const tx = await buildUsdcTransferTx({
           connection,
           fromWallet: publicKey,
