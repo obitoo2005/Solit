@@ -8,10 +8,12 @@ import {
   PublicKey,
   SystemProgram,
   TransactionMessage,
-  TransactionSignature,
   VersionedTransaction,
 } from '@solana/web3.js'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { friendlyError, logError } from '@/lib/errors'
+import { useCluster } from '@/components/cluster/cluster-data-access'
 
 export function useGetBalance({ address }: { address: PublicKey }) {
   const { connection } = useConnection()
@@ -52,42 +54,30 @@ export function useGetTokenAccounts({ address }: { address: PublicKey }) {
 
 export function useTransferSol({ address }: { address: PublicKey }) {
   const { connection } = useConnection()
-  // const transactionToast = useTransactionToast()
   const wallet = useWallet()
   const client = useQueryClient()
+  const { getExplorerUrl } = useCluster()
 
   return useMutation({
     mutationKey: ['transfer-sol', { endpoint: connection.rpcEndpoint, address }],
     mutationFn: async (input: { destination: PublicKey; amount: number }) => {
-      let signature: TransactionSignature = ''
-      try {
-        const { transaction, latestBlockhash } = await createTransaction({
-          publicKey: address,
-          destination: input.destination,
-          amount: input.amount,
-          connection,
-        })
-
-        // Send transaction and await for signature
-        signature = await wallet.sendTransaction(transaction, connection)
-
-        // Send transaction and await for signature
-        await connection.confirmTransaction({ signature, ...latestBlockhash }, 'confirmed')
-
-        console.log(signature)
-        return signature
-      } catch (error: unknown) {
-        console.log('error', `Transaction failed! ${error}`, signature)
-
-        return
-      }
+      const { transaction, latestBlockhash } = await createTransaction({
+        publicKey: address,
+        destination: input.destination,
+        amount: input.amount,
+        connection,
+      })
+      toast.message('Approve the transaction in your wallet…')
+      const signature = await wallet.sendTransaction(transaction, connection)
+      toast.message('Confirming onchain…')
+      await connection.confirmTransaction({ signature, ...latestBlockhash }, 'confirmed')
+      return signature
     },
     onSuccess: async (signature) => {
-      if (signature) {
-        // TODO: Add back Toast
-        // transactionToast(signature)
-        console.log('Transaction sent', signature)
-      }
+      toast.success('SOL sent', {
+        description: 'View on explorer',
+        action: { label: 'Open', onClick: () => window.open(getExplorerUrl(`tx/${signature}`), '_blank') },
+      })
       await Promise.all([
         client.invalidateQueries({
           queryKey: ['get-balance', { endpoint: connection.rpcEndpoint, address }],
@@ -98,32 +88,33 @@ export function useTransferSol({ address }: { address: PublicKey }) {
       ])
     },
     onError: (error) => {
-      // TODO: Add Toast
-      console.error(`Transaction failed! ${error}`)
+      logError('transferSol', error)
+      toast.error(friendlyError(error, 'Transfer failed'))
     },
   })
 }
 
 export function useRequestAirdrop({ address }: { address: PublicKey }) {
   const { connection } = useConnection()
-  // const transactionToast = useTransactionToast()
   const client = useQueryClient()
+  const { getExplorerUrl } = useCluster()
 
   return useMutation({
     mutationKey: ['airdrop', { endpoint: connection.rpcEndpoint, address }],
     mutationFn: async (amount: number = 1) => {
+      toast.message(`Requesting ${amount} SOL airdrop…`)
       const [latestBlockhash, signature] = await Promise.all([
         connection.getLatestBlockhash(),
         connection.requestAirdrop(address, amount * LAMPORTS_PER_SOL),
       ])
-
       await connection.confirmTransaction({ signature, ...latestBlockhash }, 'confirmed')
       return signature
     },
     onSuccess: async (signature) => {
-      // TODO: Add back Toast
-      // transactionToast(signature)
-      console.log('Airdrop sent', signature)
+      toast.success('Airdrop landed', {
+        description: 'View on explorer',
+        action: { label: 'Open', onClick: () => window.open(getExplorerUrl(`tx/${signature}`), '_blank') },
+      })
       await Promise.all([
         client.invalidateQueries({
           queryKey: ['get-balance', { endpoint: connection.rpcEndpoint, address }],
@@ -132,6 +123,10 @@ export function useRequestAirdrop({ address }: { address: PublicKey }) {
           queryKey: ['get-signatures', { endpoint: connection.rpcEndpoint, address }],
         }),
       ])
+    },
+    onError: (error) => {
+      logError('requestAirdrop', error)
+      toast.error(friendlyError(error, 'Airdrop failed — devnet rate limit?'))
     },
   })
 }
