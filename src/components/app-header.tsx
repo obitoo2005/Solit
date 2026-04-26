@@ -55,93 +55,99 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
   ) : null
 
   return (
-    <header className="relative z-50 border-b border-foreground/10 bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 h-14">
-        {/* Brand */}
-        <Link className="flex items-center gap-2.5" href="/">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background font-display text-lg">
-            S
-          </span>
-          <span className="font-display text-2xl leading-none">Solit</span>
-        </Link>
+    <>
+      <header className="sticky top-0 z-50 border-b border-foreground/10 bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 h-14">
+          {/* Brand */}
+          <Link className="flex items-center gap-2.5" href="/">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background font-display text-lg">
+              S
+            </span>
+            <span className="font-display text-2xl leading-none">Solit</span>
+          </Link>
 
-        {/* Center nav */}
-        <nav className="hidden md:flex items-center gap-7 absolute left-1/2 -translate-x-1/2">
-          {links.map(({ label, path }) => (
-            <Link
-              key={path}
-              href={path}
-              className={`text-sm transition hover:text-foreground ${
-                isActive(path) ? 'text-foreground font-medium' : 'text-muted-foreground'
-              }`}
-            >
-              {label}
-            </Link>
-          ))}
-        </nav>
+          {/* Center nav */}
+          <nav className="hidden md:flex items-center gap-7 absolute left-1/2 -translate-x-1/2">
+            {links.map(({ label, path }) => (
+              <Link
+                key={path}
+                href={path}
+                className={`text-sm transition hover:text-foreground ${
+                  isActive(path) ? 'text-foreground font-medium' : 'text-muted-foreground'
+                }`}
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
 
-        {/* Right cluster */}
-        <div className="hidden md:flex items-center gap-2">
-          <NotificationsBell />
-          {profileChip}
-          <WalletButton />
+          {/* Right cluster */}
+          <div className="hidden md:flex items-center gap-2">
+            <NotificationsBell />
+            {profileChip}
+            <WalletButton />
+          </div>
+
+          {/* Mobile menu trigger */}
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setShowMenu(!showMenu)}>
+            {showMenu ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </Button>
         </div>
+      </header>
 
-        {/* Mobile menu trigger */}
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setShowMenu(!showMenu)}>
-          {showMenu ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </Button>
+      {/*
+        Drawer rendered as a sibling of the header (NOT inside it) because the
+        header has `backdrop-blur-md` which creates a containing block for any
+        position:fixed descendant -- squashing the drawer to 0 height.
+      */}
+      {showMenu && (
+        <div className="md:hidden fixed inset-x-0 top-14 bottom-0 z-50 overflow-y-auto bg-background border-t border-foreground/10">
+          <div className="flex flex-col p-5 gap-5">
+            <ul className="flex flex-col gap-1">
+              {links.map(({ label, path }) => (
+                <li key={path}>
+                  <Link
+                    className={`block rounded-lg px-3 py-3 text-base transition ${
+                      isActive(path)
+                        ? 'bg-foreground/5 text-foreground font-medium'
+                        : 'text-muted-foreground hover:bg-foreground/5'
+                    }`}
+                    href={path}
+                    onClick={() => setShowMenu(false)}
+                  >
+                    {label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
 
-        {showMenu && (
-          <div
-            className="md:hidden fixed inset-x-0 top-14 bottom-0 z-40 overflow-y-auto bg-background border-t border-foreground/10"
-          >
-            <div className="flex flex-col p-5 gap-5">
-              <ul className="flex flex-col gap-1">
-                {links.map(({ label, path }) => (
-                  <li key={path}>
-                    <Link
-                      className={`block rounded-lg px-3 py-3 text-base transition ${
-                        isActive(path)
-                          ? 'bg-foreground/5 text-foreground font-medium'
-                          : 'text-muted-foreground hover:bg-foreground/5'
-                      }`}
-                      href={path}
-                      onClick={() => setShowMenu(false)}
-                    >
-                      {label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+            {connected && (
+              <button
+                onClick={() => {
+                  setProfileOpen(true)
+                  setShowMenu(false)
+                }}
+                className={`flex items-center gap-2 rounded-lg px-3 py-3 text-sm transition ${
+                  needsOnboarding
+                    ? 'border border-amber-500/40 bg-amber-50/60 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200'
+                    : 'border border-foreground/10 bg-background hover:bg-foreground/5 text-foreground/80'
+                }`}
+              >
+                <User className="h-4 w-4" />
+                {myProfile?.display_name ?? 'Set your name'}
+              </button>
+            )}
 
-              {connected && (
-                <button
-                  onClick={() => {
-                    setProfileOpen(true)
-                    setShowMenu(false)
-                  }}
-                  className={`flex items-center gap-2 rounded-lg px-3 py-3 text-sm transition ${
-                    needsOnboarding
-                      ? 'border border-amber-500/40 bg-amber-50/60 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200'
-                      : 'border border-foreground/10 bg-background hover:bg-foreground/5 text-foreground/80'
-                  }`}
-                >
-                  <User className="h-4 w-4" />
-                  {myProfile?.display_name ?? 'Set your name'}
-                </button>
-              )}
-
-              <div className="flex flex-col gap-3 pt-4 border-t border-foreground/10">
-                <WalletButton />
-                <ClusterUiSelect />
-                <ThemeSelect />
-              </div>
+            <div className="flex flex-col gap-3 pt-4 border-t border-foreground/10">
+              <WalletButton />
+              <ClusterUiSelect />
+              <ThemeSelect />
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
-    </header>
+    </>
   )
 }
