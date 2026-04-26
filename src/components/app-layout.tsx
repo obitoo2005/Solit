@@ -5,7 +5,6 @@ import { AppHeader } from '@/components/app-header'
 import React from 'react'
 import { AppFooter } from '@/components/app-footer'
 import { ClusterChecker } from '@/components/cluster/cluster-ui'
-import { AccountChecker } from '@/components/account/account-ui'
 import { FloatingControls } from '@/components/floating-controls'
 import { ConfirmDialogHost } from '@/lib/confirm'
 
@@ -20,9 +19,7 @@ export function AppLayout({
     <div className="flex flex-col min-h-screen">
       <AppHeader links={links} />
       <main className="flex-grow">
-        <ClusterChecker>
-          <AccountChecker />
-        </ClusterChecker>
+        <ClusterChecker>{null}</ClusterChecker>
         {children}
       </main>
       <AppFooter />
