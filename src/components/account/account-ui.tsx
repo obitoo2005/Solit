@@ -2,9 +2,9 @@
 
 import { useWallet } from '@solana/wallet-adapter-react'
 import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, AlertCircle, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { useCluster } from '../cluster/cluster-data-access'
@@ -18,7 +18,6 @@ import {
 } from './account-data-access'
 import { ellipsify } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { AppAlert } from '@/components/app-alert'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { AppModal } from '@/components/app-modal'
 import { Input } from '@/components/ui/input'
@@ -53,21 +52,67 @@ export function AccountBalanceCheck({ address }: { address: PublicKey }) {
   const { cluster } = useCluster()
   const mutation = useRequestAirdrop({ address })
   const query = useGetBalance({ address })
+  const dismissKey = `solit:account-banner-dismissed:${cluster.name}:${address.toBase58()}`
+  const [dismissed, setDismissed] = useState(false)
 
-  if (query.isLoading) {
+  // Hydrate dismissed flag from sessionStorage once on mount / when key changes.
+  useEffect(() => {
+    try {
+      setDismissed(sessionStorage.getItem(dismissKey) === '1')
+    } catch {
+      // sessionStorage may be unavailable (private mode, etc.)
+    }
+  }, [dismissKey])
+
+  function handleDismiss() {
+    setDismissed(true)
+    try {
+      sessionStorage.setItem(dismissKey, '1')
+    } catch {
+      // ignore
+    }
+  }
+
+  if (query.isLoading || dismissed) {
     return null
   }
   if (query.isError || !query.data) {
+    const isMainnet = cluster.network?.includes('mainnet')
     return (
-      <AppAlert
-        action={
-          <Button variant="outline" onClick={() => mutation.mutateAsync(1).catch((err) => console.log(err))}>
-            Request Airdrop
-          </Button>
-        }
-      >
-        You are connected to <strong>{cluster.name}</strong> but your account is not found on this cluster.
-      </AppAlert>
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 pt-3">
+        <div className="rounded-xl border border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10 p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-start gap-2 min-w-0">
+            <AlertCircle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <p className="text-sm text-amber-900 dark:text-amber-200 leading-snug">
+              Connected to <strong>{cluster.name}</strong> — this wallet has no balance on this cluster yet.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+            {!isMainnet && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={mutation.isPending}
+                onClick={() =>
+                  mutation
+                    .mutateAsync(1)
+                    .catch((err) => console.log(err))
+                }
+              >
+                {mutation.isPending ? 'Requesting…' : 'Request Airdrop'}
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={handleDismiss}
+              aria-label="Dismiss"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-amber-900/70 hover:bg-amber-500/10 dark:text-amber-200/70 transition"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
     )
   }
   return null
