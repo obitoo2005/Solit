@@ -2,6 +2,7 @@
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
 import { Menu, X, User } from 'lucide-react'
@@ -60,8 +61,15 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 h-14">
           {/* Brand */}
           <Link className="flex items-center gap-2.5" href="/">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background font-display text-lg">
-              S
+            <span className="relative inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-white ring-1 ring-foreground/10">
+              <Image
+                src="/logo.png"
+                alt="Solit"
+                width={36}
+                height={36}
+                priority
+                className="h-7 w-7 object-contain"
+              />
             </span>
             <span className="font-display text-2xl leading-none">Solit</span>
           </Link>
