@@ -1,0 +1,42 @@
+feat: payer picker, edit/delete, self-leave, balance cards, settle-all, receipts
+
+Add Expense
+- Pick payer dropdown (defaults to connected wallet)
+- Optional receipt photo upload (max 5MB, image/* with capture=environment)
+- Live preview with remove button
+
+Activity feed
+- Inline edit description for the payer (Pencil/Check/X icons, hover-revealed)
+- Delete expense with native confirm dialog
+- Receipt thumbnail shown next to expenses with attachments
+
+Group access
+- Self-leave for non-creators with outstanding-balance warning
+- leaveGroup helper guards against creator-leave
+
+Group list
+- listGroupSummariesForUser batches members + expenses + settlements + splits
+- Cards show "you owe $X" / "you're owed $X" / "Settled" pill
+- Member + expense counts on each card
+
+Onboarding
+- "Welcome to Solit" banner on /groups when display name is missing
+- ProfileDialog mounted with one-click "Set your name" CTA
+
+Toast UX
+- Default position to top-center + richColors
+
+Settle-all (the differentiator)
+- buildBulkUsdcTransferTx packages multiple transfers into ONE atomic Solana tx
+- Auto-creates any missing recipient ATAs in the same tx
+- SettleAllButton appears when user owes 2+ different people
+- One signature, one tx, all transfers atomic - Splitwise can't do this
+
+Mobile
+- Group detail / list headlines scale text-4xl on mobile
+- Action button rows allow flex-wrap
+
+Receipts
+- New uploadReceipt + updateExpenseReceipt helpers
+- Public Supabase Storage bucket "receipts" (run v4 SQL block)
+- Expense type extended with receipt_url (nullable)

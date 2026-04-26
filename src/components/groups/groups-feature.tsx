@@ -6,16 +6,21 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Plus, Users } from 'lucide-react'
-import { listGroupsForUser, type Group } from '@/lib/groups'
+import { listGroupSummariesForUser, type GroupSummary } from '@/lib/groups'
+import { formatCents } from '@/lib/solana/usdc'
 import { CreateGroupDialog } from '@/components/groups/create-group-dialog'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { StaggerGroup, StaggerItem, FadeUp, APPLE_SPRING, APPLE_EASE, fadeUp } from '@/components/motion'
+import { useProfiles } from '@/components/profile/profile-context'
+import { ProfileDialog } from '@/components/profile/profile-dialog'
 
 export function GroupsFeature() {
   const { publicKey, connected } = useWallet()
-  const [groups, setGroups] = useState<Group[]>([])
+  const { needsOnboarding } = useProfiles()
+  const [groups, setGroups] = useState<GroupSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
 
   useEffect(() => {
     if (!publicKey) {
@@ -24,11 +29,11 @@ export function GroupsFeature() {
     }
     let cancelled = false
     setLoading(true)
-    listGroupsForUser(publicKey.toBase58())
-      .then((data) => {
+    listGroupSummariesForUser(publicKey.toBase58())
+      .then((data: GroupSummary[]) => {
         if (!cancelled) setGroups(data)
       })
-      .catch((err) => console.error('Failed to load groups', err))
+      .catch((err: unknown) => console.error('Failed to load groups', err))
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
@@ -59,12 +64,31 @@ export function GroupsFeature() {
   return (
     <div className="solit-grid min-h-[calc(100dvh-56px)]">
       <div className="mx-auto max-w-5xl px-6 py-12 sm:py-16">
+        {needsOnboarding && (
+          <FadeUp className="mb-8 rounded-xl border border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/5 px-5 py-4 flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="font-display text-xl">Welcome to Solit</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Set a display name so friends recognize you in groups.
+              </p>
+            </div>
+            <motion.div whileTap={{ scale: 0.97 }} whileHover={{ scale: 1.02 }} transition={APPLE_SPRING}>
+              <Button
+                onClick={() => setProfileOpen(true)}
+                className="rounded-full bg-foreground text-background hover:opacity-90 px-5 shrink-0"
+              >
+                Set your name
+              </Button>
+            </motion.div>
+          </FadeUp>
+        )}
+
         <FadeUp className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <p className="font-mono-tight text-xs uppercase tracking-wider text-muted-foreground">
               {groups.length} group{groups.length === 1 ? '' : 's'}
             </p>
-            <h1 className="mt-1 font-display text-5xl sm:text-6xl tracking-tight">Your groups</h1>
+            <h1 className="mt-1 font-display text-4xl sm:text-5xl lg:text-6xl tracking-tight">Your groups</h1>
             <p className="mt-2 text-muted-foreground">Trips, dinners, rent, anything you share.</p>
           </div>
           <motion.div whileTap={{ scale: 0.97 }} whileHover={{ scale: 1.02 }} transition={APPLE_SPRING}>
@@ -124,13 +148,32 @@ export function GroupsFeature() {
                       className="group block rounded-xl border border-foreground/10 bg-background/70 backdrop-blur-sm p-5 transition-colors hover:border-foreground/40 hover:bg-background"
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <h3 className="font-display text-2xl leading-tight">{group.name}</h3>
-                        <span className="mt-1 font-mono-tight text-[10px] uppercase tracking-wider text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                        <h3 className="font-display text-2xl leading-tight truncate">{group.name}</h3>
+                        <span className="mt-1 font-mono-tight text-[10px] uppercase tracking-wider text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                           Open →
                         </span>
                       </div>
+
+                      {/* Balance pill */}
+                      <div className="mt-3">
+                        {Math.abs(group.myBalanceCents) <= 1 ? (
+                          <span className="inline-flex items-center rounded-full bg-foreground/5 border border-foreground/10 px-2.5 py-0.5 font-mono-tight text-[11px] uppercase tracking-wider text-muted-foreground">
+                            Settled
+                          </span>
+                        ) : group.myBalanceCents > 0 ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 font-mono-tight text-[11px] tabular-nums text-emerald-700 dark:text-emerald-400">
+                            you&apos;re owed {formatCents(group.myBalanceCents)}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-rose-500/10 border border-rose-500/30 px-2.5 py-0.5 font-mono-tight text-[11px] tabular-nums text-rose-700 dark:text-rose-400">
+                            you owe {formatCents(-group.myBalanceCents)}
+                          </span>
+                        )}
+                      </div>
+
                       <p className="mt-3 font-mono-tight text-[11px] uppercase tracking-wider text-muted-foreground">
-                        Created {new Date(group.created_at).toLocaleDateString()}
+                        {group.memberCount} member{group.memberCount === 1 ? '' : 's'} · {group.expenseCount} expense
+                        {group.expenseCount === 1 ? '' : 's'}
                       </p>
                     </Link>
                   </motion.div>
@@ -144,10 +187,18 @@ export function GroupsFeature() {
           open={createOpen}
           onOpenChange={setCreateOpen}
           onCreated={(group) => {
-            setGroups((prev) => [group, ...prev])
+            const summary: GroupSummary = {
+              ...group,
+              memberCount: 1,
+              expenseCount: 0,
+              myBalanceCents: 0,
+            }
+            setGroups((prev) => [summary, ...prev])
             setCreateOpen(false)
           }}
         />
+
+        <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
       </div>
     </div>
   )

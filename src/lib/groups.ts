@@ -22,6 +22,7 @@ export type Expense = {
   payer_wallet: string
   amount_cents: number
   description: string
+  receipt_url: string | null
   created_at: string
 }
 
@@ -141,6 +142,8 @@ export async function addExpense(input: {
    * If omitted, the expense is split equally across current group members at read time.
    */
   splits?: Record<string, number>
+  /** Optional public URL of the uploaded receipt photo. */
+  receiptUrl?: string | null
 }): Promise<Expense> {
   const { data, error } = await supabase
     .from('expenses')
@@ -149,6 +152,7 @@ export async function addExpense(input: {
       payer_wallet: input.payerWallet,
       amount_cents: input.amountCents,
       description: input.description,
+      receipt_url: input.receiptUrl ?? null,
     })
     .select()
     .single()
@@ -386,4 +390,189 @@ export async function joinGroupByInvite(inviteCode: string, wallet: string): Pro
     .upsert({ group_id: group.id, wallet }, { onConflict: 'group_id,wallet' })
   if (error) throw error
   return group
+}
+
+/* ---------- Expense edit / delete ---------- */
+
+export async function updateExpenseDescription(expenseId: string, description: string): Promise<void> {
+  const trimmed = description.trim()
+  if (!trimmed) throw new Error('Description cannot be empty')
+  const { error } = await supabase.from('expenses').update({ description: trimmed }).eq('id', expenseId)
+  if (error) throw error
+}
+
+export async function deleteExpense(expenseId: string): Promise<void> {
+  const { error } = await supabase.from('expenses').delete().eq('id', expenseId)
+  if (error) throw error
+}
+
+/* ---------- Receipt photos ---------- */
+
+const RECEIPTS_BUCKET = 'receipts'
+
+/**
+ * Upload a receipt image file to Supabase Storage and return its public URL.
+ * Files are namespaced by group/expense and randomized to avoid collisions.
+ */
+export async function uploadReceipt(args: {
+  groupId: string
+  file: File
+}): Promise<string> {
+  const { groupId, file } = args
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'].includes(ext) ? ext : 'jpg'
+  const path = `${groupId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`
+
+  const { error } = await supabase.storage.from(RECEIPTS_BUCKET).upload(path, file, {
+    cacheControl: '31536000',
+    upsert: false,
+    contentType: file.type || `image/${safeExt}`,
+  })
+  if (error) throw error
+
+  const { data } = supabase.storage.from(RECEIPTS_BUCKET).getPublicUrl(path)
+  return data.publicUrl
+}
+
+export async function updateExpenseReceipt(expenseId: string, receiptUrl: string | null): Promise<void> {
+  const { error } = await supabase.from('expenses').update({ receipt_url: receiptUrl }).eq('id', expenseId)
+  if (error) throw error
+}
+
+/* ---------- Self-leave ---------- */
+
+/**
+ * Convenience wrapper: a member removes themselves from a group.
+ * Creators cannot leave their own group — they must delete it instead.
+ */
+export async function leaveGroup(groupId: string, wallet: string, creatorWallet: string): Promise<void> {
+  if (wallet === creatorWallet) {
+    throw new Error('Group creator cannot leave. Delete the group instead.')
+  }
+  await removeMember(groupId, wallet)
+}
+
+/* ---------- Group summary (for the /groups list) ---------- */
+
+export type GroupSummary = Group & {
+  memberCount: number
+  expenseCount: number
+  /** Net balance (cents) for the requesting wallet within this group. Positive = owed, negative = owes. */
+  myBalanceCents: number
+}
+
+/**
+ * Fetch all groups the user is in plus aggregate counts and their personal balance per group.
+ * Done with a few batched queries (Supabase doesn't support arbitrary SQL through the JS client).
+ */
+export async function listGroupSummariesForUser(wallet: string): Promise<GroupSummary[]> {
+  const groups = await listGroupsForUser(wallet)
+  if (groups.length === 0) return []
+  const groupIds = groups.map((g) => g.id)
+
+  const [membersRes, expensesRes, settlementsRes, splitsRes] = await Promise.all([
+    supabase.from('group_members').select('group_id, wallet').in('group_id', groupIds),
+    supabase.from('expenses').select('id, group_id, payer_wallet, amount_cents').in('group_id', groupIds),
+    supabase
+      .from('settlements')
+      .select('group_id, from_wallet, to_wallet, amount_cents')
+      .in('group_id', groupIds),
+    supabase
+      .from('expense_splits')
+      .select('expense_id, wallet, share_cents, expenses!inner(group_id)')
+      .in('expenses.group_id', groupIds),
+  ])
+
+  if (membersRes.error) throw membersRes.error
+  if (expensesRes.error) throw expensesRes.error
+  if (settlementsRes.error) throw settlementsRes.error
+  if (splitsRes.error) throw splitsRes.error
+
+  const membersByGroup = new Map<string, string[]>()
+  for (const m of (membersRes.data ?? []) as { group_id: string; wallet: string }[]) {
+    if (!membersByGroup.has(m.group_id)) membersByGroup.set(m.group_id, [])
+    membersByGroup.get(m.group_id)!.push(m.wallet)
+  }
+
+  const splitsByExpenseId = new Map<string, { wallet: string; share_cents: number }[]>()
+  for (const s of (splitsRes.data ?? []) as {
+    expense_id: string
+    wallet: string
+    share_cents: number
+  }[]) {
+    if (!splitsByExpenseId.has(s.expense_id)) splitsByExpenseId.set(s.expense_id, [])
+    splitsByExpenseId
+      .get(s.expense_id)!
+      .push({ wallet: s.wallet, share_cents: s.share_cents })
+  }
+
+  const expensesByGroup = new Map<
+    string,
+    { id: string; payer_wallet: string; amount_cents: number }[]
+  >()
+  for (const e of (expensesRes.data ?? []) as {
+    id: string
+    group_id: string
+    payer_wallet: string
+    amount_cents: number
+  }[]) {
+    if (!expensesByGroup.has(e.group_id)) expensesByGroup.set(e.group_id, [])
+    expensesByGroup
+      .get(e.group_id)!
+      .push({ id: e.id, payer_wallet: e.payer_wallet, amount_cents: e.amount_cents })
+  }
+
+  const settlementsByGroup = new Map<
+    string,
+    { from_wallet: string; to_wallet: string; amount_cents: number }[]
+  >()
+  for (const s of (settlementsRes.data ?? []) as {
+    group_id: string
+    from_wallet: string
+    to_wallet: string
+    amount_cents: number
+  }[]) {
+    if (!settlementsByGroup.has(s.group_id)) settlementsByGroup.set(s.group_id, [])
+    settlementsByGroup.get(s.group_id)!.push({
+      from_wallet: s.from_wallet,
+      to_wallet: s.to_wallet,
+      amount_cents: s.amount_cents,
+    })
+  }
+
+  return groups.map<GroupSummary>((g) => {
+    const groupMembers = membersByGroup.get(g.id) ?? []
+    const groupExpenses = expensesByGroup.get(g.id) ?? []
+    const groupSettlements = settlementsByGroup.get(g.id) ?? []
+
+    let myBalance = 0
+    for (const e of groupExpenses) {
+      const customSplits = splitsByExpenseId.get(e.id)
+      if (e.payer_wallet === wallet) myBalance += e.amount_cents
+      if (customSplits && customSplits.length > 0) {
+        for (const s of customSplits) {
+          if (s.wallet === wallet) myBalance -= s.share_cents
+        }
+      } else if (groupMembers.length > 0) {
+        // Equal split — distribute remainder to first members
+        const base = Math.floor(e.amount_cents / groupMembers.length)
+        const remainder = e.amount_cents - base * groupMembers.length
+        const idx = groupMembers.indexOf(wallet)
+        if (idx >= 0) {
+          myBalance -= base + (idx < remainder ? 1 : 0)
+        }
+      }
+    }
+    for (const s of groupSettlements) {
+      if (s.from_wallet === wallet) myBalance += s.amount_cents
+      if (s.to_wallet === wallet) myBalance -= s.amount_cents
+    }
+
+    return {
+      ...g,
+      memberCount: groupMembers.length,
+      expenseCount: groupExpenses.length,
+      myBalanceCents: myBalance,
+    }
+  })
 }

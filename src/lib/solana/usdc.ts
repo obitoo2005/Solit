@@ -123,5 +123,64 @@ export async function getUsdcBalance(args: {
   }
 }
 
+/**
+ * Build a single transaction that transfers USDC from `fromWallet` to multiple recipients.
+ * Auto-creates any missing recipient ATAs (fromWallet pays the rent).
+ *
+ * This is Solit's differentiator vs Splitwise: a single onchain action settles all your debts.
+ * Useful when you owe several people in the same group — one tx, one signature, all transfers atomic.
+ *
+ * Returns the unsigned transaction. Caller signs via the wallet adapter and sends.
+ */
+export async function buildBulkUsdcTransferTx(args: {
+  connection: Connection
+  fromWallet: PublicKey
+  transfers: { toWallet: PublicKey; amountBaseUnits: bigint }[]
+  cluster: string
+}): Promise<Transaction> {
+  const { connection, fromWallet, transfers, cluster } = args
+  if (transfers.length === 0) throw new Error('No transfers to bundle')
+
+  const mint = getUsdcMint(cluster)
+  const fromAta = getAssociatedTokenAddressSync(mint, fromWallet)
+  const instructions: TransactionInstruction[] = []
+
+  // Pre-compute recipient ATAs and check which don't exist yet
+  const recipientAtas = transfers.map((t) => ({
+    toWallet: t.toWallet,
+    ata: getAssociatedTokenAddressSync(mint, t.toWallet),
+    amountBaseUnits: t.amountBaseUnits,
+  }))
+
+  const ataInfos = await Promise.all(
+    recipientAtas.map((r) => connection.getAccountInfo(r.ata)),
+  )
+
+  recipientAtas.forEach((r, i) => {
+    if (!ataInfos[i]) {
+      instructions.push(
+        createAssociatedTokenAccountInstruction(
+          fromWallet,
+          r.ata,
+          r.toWallet,
+          mint,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID,
+        ),
+      )
+    }
+  })
+
+  for (const r of recipientAtas) {
+    instructions.push(createTransferInstruction(fromAta, r.ata, fromWallet, r.amountBaseUnits))
+  }
+
+  const tx = new Transaction().add(...instructions)
+  const { blockhash } = await connection.getLatestBlockhash('confirmed')
+  tx.recentBlockhash = blockhash
+  tx.feePayer = fromWallet
+  return tx
+}
+
 // Re-export common SPL helpers so callers don't need to import from spl-token directly.
 export { getMint, SystemProgram }

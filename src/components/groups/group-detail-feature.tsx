@@ -2,8 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Settings, Share2 } from 'lucide-react'
+import { ArrowLeft, Settings, Share2, LogOut } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ import {
   computeBalances,
   computeSettlementPlan,
   groupSplits,
+  leaveGroup,
   type Group,
   type GroupMember,
   type Expense,
@@ -24,6 +26,7 @@ import {
 } from '@/lib/groups'
 import { AddExpenseDialog } from '@/components/groups/add-expense-dialog'
 import { SettleUpButton } from '@/components/groups/settle-up-button'
+import { SettleAllButton } from '@/components/groups/settle-all-button'
 import { ExpenseList } from '@/components/groups/expense-list'
 import { BalancesPanel } from '@/components/groups/balances-panel'
 import { GroupSettingsDialog } from '@/components/groups/group-settings-dialog'
@@ -32,6 +35,7 @@ import { useProfiles } from '@/components/profile/profile-context'
 import { APPLE_SPRING } from '@/components/motion'
 
 export function GroupDetailFeature({ groupId }: { groupId: string }) {
+  const router = useRouter()
   const { publicKey, connected } = useWallet()
   const { loadProfiles } = useProfiles()
   const [group, setGroup] = useState<Group | null>(null)
@@ -77,6 +81,30 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  async function handleLeave() {
+    if (!group || !publicKey) return
+    const myWalletStr = publicKey.toBase58()
+    const myBalance = balances[myWalletStr] ?? 0
+    if (Math.abs(myBalance) > 1) {
+      const proceed = window.confirm(
+        `You still have an outstanding balance in this group (${
+          myBalance > 0 ? 'owed' : 'owe'
+        } $${(Math.abs(myBalance) / 100).toFixed(2)}). Leave anyway?`,
+      )
+      if (!proceed) return
+    } else if (!window.confirm(`Leave "${group.name}"?`)) {
+      return
+    }
+    try {
+      await leaveGroup(group.id, myWalletStr, group.creator_wallet)
+      toast.success('You left the group')
+      router.push('/groups')
+    } catch (err) {
+      console.error(err)
+      toast.error(err instanceof Error ? err.message : 'Failed to leave group')
+    }
+  }
 
   async function copyInviteLink() {
     if (!group?.invite_code) {
@@ -156,9 +184,11 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
               {members.length} member{members.length === 1 ? '' : 's'} · {expenses.length} expense
               {expenses.length === 1 ? '' : 's'}
             </p>
-            <h1 className="mt-1 font-display text-5xl sm:text-6xl tracking-tight">{group.name}</h1>
+            <h1 className="mt-1 font-display text-4xl sm:text-5xl lg:text-6xl tracking-tight break-words">
+              {group.name}
+            </h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <motion.div whileTap={{ scale: 0.95 }} whileHover={{ scale: 1.04 }} transition={APPLE_SPRING}>
               <Button
                 variant="ghost"
@@ -169,7 +199,7 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
                 <Share2 className="h-4 w-4 mr-1.5" /> Invite
               </Button>
             </motion.div>
-            {isCreator && (
+            {isCreator ? (
               <motion.div whileTap={{ scale: 0.95 }} whileHover={{ scale: 1.04 }} transition={APPLE_SPRING}>
                 <Button
                   variant="ghost"
@@ -178,6 +208,17 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
                   title="Group settings"
                 >
                   <Settings className="h-4 w-4" />
+                </Button>
+              </motion.div>
+            ) : (
+              <motion.div whileTap={{ scale: 0.95 }} whileHover={{ scale: 1.04 }} transition={APPLE_SPRING}>
+                <Button
+                  variant="ghost"
+                  onClick={handleLeave}
+                  className="rounded-full border border-foreground/15 text-rose-600 hover:bg-rose-500/10 hover:text-rose-700"
+                  title="Leave this group"
+                >
+                  <LogOut className="h-4 w-4 mr-1.5" /> Leave
                 </Button>
               </motion.div>
             )}
@@ -208,23 +249,31 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
                 <p className="text-sm text-muted-foreground">All balances are settled.</p>
               </div>
             ) : (
-              <ul className="space-y-2">
-                {plan.map((t, i) => (
-                  <SettleUpButton
-                    key={i}
-                    groupId={group.id}
-                    members={members}
-                    transfer={t}
-                    myWallet={myWallet}
-                    onSettled={refresh}
-                  />
-                ))}
+              <>
+                <SettleAllButton
+                  groupId={group.id}
+                  myWallet={myWallet}
+                  myDebts={myDebts}
+                  onSettled={refresh}
+                />
+                <ul className="space-y-2">
+                  {plan.map((t, i) => (
+                    <SettleUpButton
+                      key={i}
+                      groupId={group.id}
+                      members={members}
+                      transfer={t}
+                      myWallet={myWallet}
+                      onSettled={refresh}
+                    />
+                  ))}
+                </ul>
                 {myDebts.length === 0 && (
                   <p className="mt-3 font-mono-tight text-[11px] text-muted-foreground">
                     Nothing for you to settle right now — others owe each other.
                   </p>
                 )}
-              </ul>
+              </>
             )}
           </div>
         </div>
@@ -236,7 +285,13 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
               {expenses.length + settlements.length} event{expenses.length + settlements.length === 1 ? '' : 's'}
             </span>
           </div>
-          <ExpenseList expenses={expenses} settlements={settlements} members={members} />
+          <ExpenseList
+            expenses={expenses}
+            settlements={settlements}
+            members={members}
+            myWallet={myWallet}
+            onChanged={refresh}
+          />
         </div>
 
         <AddExpenseDialog
