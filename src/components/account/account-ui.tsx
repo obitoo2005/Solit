@@ -5,6 +5,7 @@ import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
 import { RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 
 import { useCluster } from '../cluster/cluster-data-access'
 import { ExplorerLink } from '../cluster/cluster-ui'
@@ -27,8 +28,15 @@ export function AccountBalance({ address }: { address: PublicKey }) {
   const query = useGetBalance({ address })
 
   return (
-    <h1 className="text-5xl font-bold cursor-pointer" onClick={() => query.refetch()}>
-      {query.data ? <BalanceSol balance={query.data} /> : '...'} SOL
+    <h1
+      className="text-5xl font-bold cursor-pointer hover:opacity-80 transition-opacity"
+      onClick={() => {
+        query.refetch()
+        toast.message('Refreshing balance…')
+      }}
+      title="Click to refresh"
+    >
+      {query.data != null ? <BalanceSol balance={query.data} /> : '…'} SOL
     </h1>
   )
 }
@@ -93,21 +101,20 @@ export function AccountTokens({ address }: { address: PublicKey }) {
         <div className="flex justify-between">
           <h2 className="text-2xl font-bold">Token Accounts</h2>
           <div className="space-x-2">
-            {query.isLoading ? (
-              <span className="loading loading-spinner"></span>
-            ) : (
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  await query.refetch()
-                  await client.invalidateQueries({
-                    queryKey: ['getTokenAccountBalance'],
-                  })
-                }}
-              >
-                <RefreshCw size={16} />
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              disabled={query.isFetching}
+              onClick={async () => {
+                await query.refetch()
+                await client.invalidateQueries({
+                  queryKey: ['getTokenAccountBalance'],
+                })
+                toast.success('Token accounts refreshed')
+              }}
+              title="Refresh token accounts"
+            >
+              <RefreshCw size={16} className={query.isFetching ? 'animate-spin' : ''} />
+            </Button>
           </div>
         </div>
       </div>
@@ -183,13 +190,17 @@ export function AccountTransactions({ address }: { address: PublicKey }) {
       <div className="flex justify-between">
         <h2 className="text-2xl font-bold">Transaction History</h2>
         <div className="space-x-2">
-          {query.isLoading ? (
-            <span className="loading loading-spinner"></span>
-          ) : (
-            <Button variant="outline" onClick={() => query.refetch()}>
-              <RefreshCw size={16} />
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            disabled={query.isFetching}
+            onClick={async () => {
+              await query.refetch()
+              toast.success('Transactions refreshed')
+            }}
+            title="Refresh transactions"
+          >
+            <RefreshCw size={16} className={query.isFetching ? 'animate-spin' : ''} />
+          </Button>
         </div>
       </div>
       {query.isError && <pre className="alert alert-error">Error: {query.error?.message.toString()}</pre>}
