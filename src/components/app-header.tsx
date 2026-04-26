@@ -66,8 +66,6 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
         {/* Right cluster */}
         <div className="hidden md:flex items-center gap-2">
           {profileChip}
-          <ClusterUiSelect />
-          <ThemeSelect />
           <WalletButton />
         </div>
 
