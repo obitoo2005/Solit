@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { Trash2, Send } from 'lucide-react'
@@ -29,6 +29,16 @@ export function CommentsThread({ expenseId, myWallet, initialComments, onCountCh
   const [loading, setLoading] = useState(initialComments == null)
   const [submitting, setSubmitting] = useState(false)
 
+  // Stash latest onCountChange in a ref so we can call it without re-firing the
+  // load effect every time the parent re-renders with a fresh inline callback.
+  const onCountChangeRef = useRef(onCountChange)
+  useEffect(() => {
+    onCountChangeRef.current = onCountChange
+  }, [onCountChange])
+
+  // Re-fetch only when the expense actually changes. initialComments is only
+  // honored on mount; if the parent already pre-fetched, skip.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (initialComments != null) return
     let cancelled = false
@@ -37,7 +47,7 @@ export function CommentsThread({ expenseId, myWallet, initialComments, onCountCh
       .then((rows) => {
         if (!cancelled) {
           setComments(rows)
-          onCountChange?.(rows.length)
+          onCountChangeRef.current?.(rows.length)
         }
       })
       .catch((err) => logError('listComments', err))
@@ -47,7 +57,7 @@ export function CommentsThread({ expenseId, myWallet, initialComments, onCountCh
     return () => {
       cancelled = true
     }
-  }, [expenseId, initialComments, onCountChange])
+  }, [expenseId])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
