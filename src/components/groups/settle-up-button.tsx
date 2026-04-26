@@ -13,7 +13,7 @@ import { centsToLamports, formatSol, getSolUsdPrice } from '@/lib/price'
 import { recordSettlement, type GroupMember, type SettlementAsset } from '@/lib/groups'
 import { APPLE_SPRING } from '@/components/motion'
 import { useProfiles } from '@/components/profile/profile-context'
-import { checkSettlePreflight, requestDevnetAirdrop, showPreflightFailure } from '@/lib/preflight'
+import { checkSettlePreflight, showPreflightFailure } from '@/lib/preflight'
 
 type Props = {
   groupId: string
@@ -92,10 +92,7 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
           isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
         })
         if (!pre.ok) {
-          showPreflightFailure(pre, {
-            onSolAirdrop: () =>
-              requestDevnetAirdrop({ connection, wallet: publicKey }),
-          })
+          showPreflightFailure(pre)
           return
         }
 
@@ -120,10 +117,7 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
           isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
         })
         if (!pre.ok) {
-          showPreflightFailure(pre, {
-            onSolAirdrop: () =>
-              requestDevnetAirdrop({ connection, wallet: publicKey }),
-          })
+          showPreflightFailure(pre)
           return
         }
 

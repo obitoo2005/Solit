@@ -13,7 +13,7 @@ import { buildBulkSolTransferTx } from '@/lib/solana/sol'
 import { centsToLamports, formatSol, getSolUsdPrice } from '@/lib/price'
 import { recordSettlement, type SettlementAsset } from '@/lib/groups'
 import { APPLE_SPRING } from '@/components/motion'
-import { checkSettlePreflight, requestDevnetAirdrop, showPreflightFailure } from '@/lib/preflight'
+import { checkSettlePreflight, showPreflightFailure } from '@/lib/preflight'
 
 type Transfer = { from: string; to: string; amountCents: number }
 
@@ -89,10 +89,7 @@ export function SettleAllButton({ groupId, myWallet, myDebts, onSettled }: Props
           isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
         })
         if (!pre.ok) {
-          showPreflightFailure(pre, {
-            onSolAirdrop: () =>
-              requestDevnetAirdrop({ connection, wallet: publicKey }),
-          })
+          showPreflightFailure(pre)
           return
         }
 
@@ -119,10 +116,7 @@ export function SettleAllButton({ groupId, myWallet, myDebts, onSettled }: Props
           isDevnetLike: (cluster.network ?? 'devnet') !== 'mainnet-beta',
         })
         if (!pre.ok) {
-          showPreflightFailure(pre, {
-            onSolAirdrop: () =>
-              requestDevnetAirdrop({ connection, wallet: publicKey }),
-          })
+          showPreflightFailure(pre)
           return
         }
 
