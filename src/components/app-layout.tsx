@@ -7,6 +7,7 @@ import { AppFooter } from '@/components/app-footer'
 import { ClusterChecker } from '@/components/cluster/cluster-ui'
 import { AccountChecker } from '@/components/account/account-ui'
 import { FloatingControls } from '@/components/floating-controls'
+import { ConfirmDialogHost } from '@/lib/confirm'
 
 export function AppLayout({
   children,
@@ -27,6 +28,7 @@ export function AppLayout({
       <AppFooter />
       <FloatingControls />
       <Toaster />
+      <ConfirmDialogHost />
     </div>
   )
 }

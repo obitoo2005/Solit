@@ -15,6 +15,7 @@ import {
 } from '@/lib/groups'
 import { useProfiles } from '@/components/profile/profile-context'
 import { CommentsThread } from '@/components/groups/comments-thread'
+import { confirm } from '@/lib/confirm'
 
 type Props = {
   expenses: Expense[]
@@ -75,7 +76,13 @@ export function ExpenseList({
   }
 
   async function handleDelete(expenseId: string) {
-    if (!window.confirm('Delete this expense? This will also remove its custom splits.')) return
+    const ok = await confirm({
+      title: 'Delete this expense?',
+      description: 'Custom splits attached to it will also be removed. This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
     try {
       setBusy(true)
       await deleteExpense(expenseId)

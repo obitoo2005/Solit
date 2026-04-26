@@ -30,6 +30,7 @@ import { SettleUpButton } from '@/components/groups/settle-up-button'
 import { SettleAllButton } from '@/components/groups/settle-all-button'
 import { ExpenseList } from '@/components/groups/expense-list'
 import { RecurringPanel } from '@/components/groups/recurring-panel'
+import { confirm } from '@/lib/confirm'
 import { BalancesPanel } from '@/components/groups/balances-panel'
 import { GroupSettingsDialog } from '@/components/groups/group-settings-dialog'
 import { WalletButton } from '@/components/solana/solana-provider'
@@ -92,14 +93,23 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
     const myWalletStr = publicKey.toBase58()
     const myBalance = balances[myWalletStr] ?? 0
     if (Math.abs(myBalance) > 1) {
-      const proceed = window.confirm(
-        `You still have an outstanding balance in this group (${
-          myBalance > 0 ? 'owed' : 'owe'
-        } $${(Math.abs(myBalance) / 100).toFixed(2)}). Leave anyway?`,
-      )
+      const proceed = await confirm({
+        title: `Leave "${group.name}"?`,
+        description: `You still have an outstanding balance in this group (${
+          myBalance > 0 ? 'you are owed' : 'you owe'
+        } $${(Math.abs(myBalance) / 100).toFixed(2)}). You can leave anyway, but settle up first if you can.`,
+        confirmLabel: 'Leave anyway',
+        destructive: true,
+      })
       if (!proceed) return
-    } else if (!window.confirm(`Leave "${group.name}"?`)) {
-      return
+    } else {
+      const proceed = await confirm({
+        title: `Leave "${group.name}"?`,
+        description: 'You can rejoin via the invite link any time.',
+        confirmLabel: 'Leave',
+        destructive: true,
+      })
+      if (!proceed) return
     }
     try {
       await leaveGroup(group.id, myWalletStr, group.creator_wallet)

@@ -12,6 +12,7 @@ import {
 } from '@/lib/groups'
 import { useProfiles } from '@/components/profile/profile-context'
 import { friendlyError, logError } from '@/lib/errors'
+import { confirm as confirmDialog } from '@/lib/confirm'
 
 type Props = {
   expenseId: string
@@ -75,7 +76,12 @@ export function CommentsThread({ expenseId, myWallet, initialComments, onCountCh
 
   async function handleDelete(c: ExpenseComment) {
     if (c.author_wallet !== myWallet) return
-    if (!confirm('Delete this comment?')) return
+    const ok = await confirmDialog({
+      title: 'Delete this comment?',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
     try {
       await deleteComment(c.id)
       setComments((prev) => {

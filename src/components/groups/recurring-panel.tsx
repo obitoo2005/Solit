@@ -15,6 +15,7 @@ import {
 import { formatCents } from '@/lib/solana/usdc'
 import { useProfiles } from '@/components/profile/profile-context'
 import { friendlyError, logError } from '@/lib/errors'
+import { confirm as confirmDialog } from '@/lib/confirm'
 import { RecurringDialog } from '@/components/groups/recurring-dialog'
 import { APPLE_SPRING } from '@/components/motion'
 
@@ -72,7 +73,13 @@ export function RecurringPanel({ groupId, members, onChanged }: Props) {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this recurring template? Already-created expenses stay.')) return
+    const ok = await confirmDialog({
+      title: 'Delete this recurring template?',
+      description: 'Future runs will stop, but expenses already created from it will stay in the activity feed.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
     try {
       await deleteRecurring(id)
       setItems((prev) => prev.filter((r) => r.id !== id))
