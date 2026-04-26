@@ -33,6 +33,8 @@ export type ExpenseSplit = {
   share_cents: number
 }
 
+export type SettlementAsset = 'USDC' | 'SOL'
+
 export type Settlement = {
   id: string
   group_id: string
@@ -40,6 +42,9 @@ export type Settlement = {
   to_wallet: string
   amount_cents: number
   tx_signature: string
+  asset: SettlementAsset
+  /** Base-unit amount of the asset actually transferred onchain, as a string (lamports for SOL, USDC base units for USDC). Null for legacy rows. */
+  asset_amount_base_units: string | null
   created_at: string
 }
 
@@ -196,6 +201,9 @@ export async function recordSettlement(input: {
   toWallet: string
   amountCents: number
   txSignature: string
+  asset?: SettlementAsset
+  /** Base units of asset actually moved (lamports for SOL, USDC base units for USDC). Pass as bigint or string. */
+  assetAmountBaseUnits?: bigint | string
 }): Promise<Settlement> {
   const { data, error } = await supabase
     .from('settlements')
@@ -205,6 +213,9 @@ export async function recordSettlement(input: {
       to_wallet: input.toWallet,
       amount_cents: input.amountCents,
       tx_signature: input.txSignature,
+      asset: input.asset ?? 'USDC',
+      asset_amount_base_units:
+        input.assetAmountBaseUnits != null ? input.assetAmountBaseUnits.toString() : null,
     })
     .select()
     .single()

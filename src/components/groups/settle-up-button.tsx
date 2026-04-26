@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { PublicKey } from '@solana/web3.js'
 import { toast } from 'sonner'
@@ -8,7 +8,9 @@ import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { useCluster } from '@/components/cluster/cluster-data-access'
 import { buildUsdcTransferTx, centsToUsdcBaseUnits, formatCents } from '@/lib/solana/usdc'
-import { recordSettlement, type GroupMember } from '@/lib/groups'
+import { buildSolTransferTx } from '@/lib/solana/sol'
+import { centsToLamports, formatSol, getSolUsdPrice } from '@/lib/price'
+import { recordSettlement, type GroupMember, type SettlementAsset } from '@/lib/groups'
 import { APPLE_SPRING } from '@/components/motion'
 import { useProfiles } from '@/components/profile/profile-context'
 
@@ -26,10 +28,35 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
   const { cluster } = useCluster()
   const { resolveName } = useProfiles()
   const [submitting, setSubmitting] = useState(false)
+  const [asset, setAsset] = useState<SettlementAsset>('USDC')
+  const [solPrice, setSolPrice] = useState<number | null>(null)
+  const [priceLoading, setPriceLoading] = useState(false)
 
   const isMine = transfer.from === myWallet
   const fromName = members.find((m) => m.wallet === transfer.from)?.display_name || resolveName(transfer.from)
   const toName = members.find((m) => m.wallet === transfer.to)?.display_name || resolveName(transfer.to)
+
+  // Lazy-load SOL price when user picks SOL
+  useEffect(() => {
+    if (asset !== 'SOL' || solPrice != null) return
+    let cancelled = false
+    setPriceLoading(true)
+    getSolUsdPrice()
+      .then((p) => {
+        if (!cancelled) setSolPrice(p)
+      })
+      .catch((err) => {
+        console.error(err)
+        if (!cancelled) toast.error('Could not load SOL price — falling back to USDC')
+        if (!cancelled) setAsset('USDC')
+      })
+      .finally(() => {
+        if (!cancelled) setPriceLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [asset, solPrice])
 
   async function handleSettle() {
     if (!publicKey) {
@@ -43,17 +70,37 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
 
     try {
       setSubmitting(true)
-      const tx = await buildUsdcTransferTx({
-        connection,
-        fromWallet: publicKey,
-        toWallet: new PublicKey(transfer.to),
-        amountBaseUnits: centsToUsdcBaseUnits(transfer.amountCents),
-        cluster: cluster.network ?? 'devnet',
-      })
+      let sig: string
+      let assetAmountBaseUnits: bigint
 
-      toast.message('Approve the transaction in your wallet...')
-      const sig = await sendTransaction(tx, connection)
-      toast.message('Confirming transaction...')
+      if (asset === 'SOL') {
+        if (!solPrice) {
+          toast.error('SOL price not loaded yet')
+          return
+        }
+        assetAmountBaseUnits = centsToLamports(transfer.amountCents, solPrice)
+        const tx = await buildSolTransferTx({
+          connection,
+          fromWallet: publicKey,
+          toWallet: new PublicKey(transfer.to),
+          amountLamports: assetAmountBaseUnits,
+        })
+        toast.message('Approve the SOL transfer in your wallet…')
+        sig = await sendTransaction(tx, connection)
+      } else {
+        assetAmountBaseUnits = centsToUsdcBaseUnits(transfer.amountCents)
+        const tx = await buildUsdcTransferTx({
+          connection,
+          fromWallet: publicKey,
+          toWallet: new PublicKey(transfer.to),
+          amountBaseUnits: assetAmountBaseUnits,
+          cluster: cluster.network ?? 'devnet',
+        })
+        toast.message('Approve the transaction in your wallet…')
+        sig = await sendTransaction(tx, connection)
+      }
+
+      toast.message('Confirming onchain…')
       await connection.confirmTransaction(sig, 'confirmed')
 
       await recordSettlement({
@@ -62,9 +109,15 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
         toWallet: transfer.to,
         amountCents: transfer.amountCents,
         txSignature: sig,
+        asset,
+        assetAmountBaseUnits,
       })
 
-      toast.success(`Settled ${formatCents(transfer.amountCents)} to ${toName}`)
+      const amountLabel =
+        asset === 'SOL'
+          ? `${formatSol(assetAmountBaseUnits)} (≈ ${formatCents(transfer.amountCents)})`
+          : formatCents(transfer.amountCents)
+      toast.success(`Settled ${amountLabel} to ${toName}`)
       onSettled()
     } catch (err: unknown) {
       console.error(err)
@@ -75,13 +128,18 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
     }
   }
 
+  const solAmountPreview =
+    asset === 'SOL' && solPrice
+      ? formatSol(centsToLamports(transfer.amountCents, solPrice))
+      : null
+
   return (
     <motion.li
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
       whileHover={{ y: -1 }}
-      className="rounded-lg border border-foreground/10 bg-background/50 p-3 flex items-center justify-between gap-3"
+      className="rounded-lg border border-foreground/10 bg-background/50 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
     >
       <div className="text-sm min-w-0">
         <p className="truncate">
@@ -89,24 +147,53 @@ export function SettleUpButton({ groupId, members, transfer, myWallet, onSettled
           <span className="text-muted-foreground"> owes </span>
           <span className="font-medium">{toName}</span>
         </p>
-        <p className="mt-0.5 font-mono-tight tabular-nums text-base">{formatCents(transfer.amountCents)}</p>
+        <p className="mt-0.5 font-mono-tight tabular-nums text-base">
+          {formatCents(transfer.amountCents)}
+          {solAmountPreview && (
+            <span className="ml-2 text-muted-foreground text-sm">≈ {solAmountPreview}</span>
+          )}
+        </p>
       </div>
+
       {isMine ? (
-        <motion.div
-          whileTap={{ scale: 0.95 }}
-          whileHover={{ scale: 1.04 }}
-          transition={APPLE_SPRING}
-          className="shrink-0"
-        >
-          <Button
-            size="sm"
-            onClick={handleSettle}
-            disabled={submitting}
-            className="rounded-full bg-foreground text-background hover:opacity-90 px-4"
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Asset toggle */}
+          <div className="inline-flex rounded-full border border-foreground/15 p-0.5 bg-background/70">
+            {(['USDC', 'SOL'] as const).map((a) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => setAsset(a)}
+                disabled={submitting}
+                className={`rounded-full px-2.5 py-0.5 font-mono-tight text-[10px] uppercase tracking-wider transition ${
+                  asset === a
+                    ? 'bg-foreground text-background'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+          <motion.div
+            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: 1.04 }}
+            transition={APPLE_SPRING}
           >
-            {submitting ? 'Sending…' : 'Settle in USDC'}
-          </Button>
-        </motion.div>
+            <Button
+              size="sm"
+              onClick={handleSettle}
+              disabled={submitting || (asset === 'SOL' && (priceLoading || !solPrice))}
+              className="rounded-full bg-foreground text-background hover:opacity-90 px-4"
+            >
+              {submitting
+                ? 'Sending…'
+                : asset === 'SOL' && priceLoading
+                  ? 'Loading price…'
+                  : `Settle in ${asset}`}
+            </Button>
+          </motion.div>
+        </div>
       ) : (
         <span className="font-mono-tight text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
           awaiting payer

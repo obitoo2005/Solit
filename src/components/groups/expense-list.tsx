@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Pencil, Trash2, Check, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCents } from '@/lib/solana/usdc'
+import { formatSol } from '@/lib/price'
 import {
   type Expense,
   type Settlement,
@@ -186,15 +187,34 @@ export function ExpenseList({ expenses, settlements, members, myWallet, onChange
           )
         }
         const s = item.data
+        const isSol = s.asset === 'SOL'
+        const onchainAmountLabel =
+          isSol && s.asset_amount_base_units
+            ? formatSol(BigInt(s.asset_amount_base_units))
+            : null
+
         return (
-          <li key={`s-${s.id}`} className="flex items-center justify-between px-5 py-3.5 bg-emerald-50/40 dark:bg-emerald-950/20">
-            <div>
-              <p className="text-sm">
-                <span className="font-mono-tight text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mr-2">
+          <li
+            key={`s-${s.id}`}
+            className="flex items-center justify-between px-5 py-3.5 bg-emerald-50/40 dark:bg-emerald-950/20"
+          >
+            <div className="min-w-0">
+              <p className="text-sm flex items-center gap-2 flex-wrap">
+                <span className="font-mono-tight text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
                   Settled
                 </span>
-                <span className="font-medium">
-                  {memberNames.get(s.from_wallet) ?? resolveName(s.from_wallet)} → {memberNames.get(s.to_wallet) ?? resolveName(s.to_wallet)}
+                <span
+                  className={`font-mono-tight text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 ${
+                    isSol
+                      ? 'bg-violet-500/10 border border-violet-500/30 text-violet-700 dark:text-violet-400'
+                      : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400'
+                  }`}
+                >
+                  {s.asset || 'USDC'}
+                </span>
+                <span className="font-medium truncate">
+                  {memberNames.get(s.from_wallet) ?? resolveName(s.from_wallet)} →{' '}
+                  {memberNames.get(s.to_wallet) ?? resolveName(s.to_wallet)}
                 </span>
               </p>
               <p className="mt-0.5 font-mono-tight text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -210,9 +230,16 @@ export function ExpenseList({ expenses, settlements, members, myWallet, onChange
                 {new Date(s.created_at).toLocaleDateString()}
               </p>
             </div>
-            <span className="font-mono-tight tabular-nums text-sm text-emerald-700 dark:text-emerald-400">
-              {formatCents(s.amount_cents)}
-            </span>
+            <div className="text-right shrink-0">
+              <span className="font-mono-tight tabular-nums text-sm text-emerald-700 dark:text-emerald-400 block">
+                {onchainAmountLabel ?? formatCents(s.amount_cents)}
+              </span>
+              {onchainAmountLabel && (
+                <span className="font-mono-tight text-[10px] text-muted-foreground">
+                  ≈ {formatCents(s.amount_cents)}
+                </span>
+              )}
+            </div>
           </li>
         )
       })}
