@@ -12,7 +12,7 @@ export function AppFooter() {
           <span>Solit · Settle on Solana</span>
         </div>
         <div className="flex items-center gap-4">
-          <span className="hidden sm:inline">Built on Solana · USDC settlement</span>
+          <span className="hidden sm:inline">Built by Abdul Haseeb · Located in Faisalabad 🇵🇰</span>
           <span>© {new Date().getFullYear()}</span>
         </div>
       </div>
