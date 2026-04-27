@@ -8,7 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Camera, X as XIcon } from 'lucide-react'
-import { addExpense, uploadReceipt, type GroupMember } from '@/lib/groups'
+import {
+  addExpense,
+  updateExpense,
+  uploadReceipt,
+  type Expense,
+  type ExpenseSplit,
+  type GroupMember,
+} from '@/lib/groups'
 import { formatCents } from '@/lib/solana/usdc'
 import { useProfiles } from '@/components/profile/profile-context'
 import { friendlyError, logError } from '@/lib/errors'
@@ -19,14 +26,35 @@ type Props = {
   onOpenChange: (open: boolean) => void
   groupId: string
   members: GroupMember[]
+  /**
+   * Called after a successful add OR edit. Caller should refresh + close.
+   * Kept named `onAdded` for backwards compatibility.
+   */
   onAdded: () => void
+  /**
+   * When provided, the dialog acts as an EDIT form for this expense
+   * instead of an add form. Pre-fills all fields and calls
+   * {@link updateExpense} on submit.
+   */
+  expense?: Expense | null
+  /** Existing custom splits for the expense (only used in edit mode). */
+  existingSplits?: ExpenseSplit[]
 }
 
 type SplitMode = 'equal' | 'custom'
 
-export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded }: Props) {
+export function AddExpenseDialog({
+  open,
+  onOpenChange,
+  groupId,
+  members,
+  onAdded,
+  expense,
+  existingSplits,
+}: Props) {
   const { publicKey } = useWallet()
   const { resolveName } = useProfiles()
+  const isEditMode = !!expense
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [payerWallet, setPayerWallet] = useState<string>('')
@@ -35,25 +63,55 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
   const [emoji, setEmoji] = useState<string | null>(null)
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
+  const [existingReceiptUrl, setExistingReceiptUrl] = useState<string | null>(null)
+  const [receiptRemoved, setReceiptRemoved] = useState(false)
   const [uploadingReceipt, setUploadingReceipt] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  // When dialog re-opens, reset state and default payer to connected wallet
+  // When dialog re-opens, reset state. In edit mode, pre-fill from the expense.
   useEffect(() => {
     if (!open) return
-    setShares({})
-    setSplitMode('equal')
-    setEmoji(null)
     setReceiptFile(null)
     setReceiptPreview(null)
     setUploadingReceipt(false)
+
+    if (expense) {
+      // Edit mode: pre-fill all fields from the existing expense.
+      setDescription(expense.description)
+      setAmount((expense.amount_cents / 100).toFixed(2))
+      setPayerWallet(expense.payer_wallet)
+      setEmoji(expense.emoji)
+      setExistingReceiptUrl(expense.receipt_url)
+      setReceiptRemoved(false)
+      if (existingSplits && existingSplits.length > 0) {
+        setSplitMode('custom')
+        const next: Record<string, string> = {}
+        for (const s of existingSplits) {
+          next[s.wallet] = (s.share_cents / 100).toFixed(2)
+        }
+        setShares(next)
+      } else {
+        setSplitMode('equal')
+        setShares({})
+      }
+      return
+    }
+
+    // Add mode: blank slate, default payer to connected wallet.
+    setDescription('')
+    setAmount('')
+    setShares({})
+    setSplitMode('equal')
+    setEmoji(null)
+    setExistingReceiptUrl(null)
+    setReceiptRemoved(false)
     const myWallet = publicKey?.toBase58()
     if (myWallet && members.some((m) => m.wallet === myWallet)) {
       setPayerWallet(myWallet)
     } else if (members.length > 0) {
       setPayerWallet(members[0].wallet)
     }
-  }, [open, publicKey, members])
+  }, [open, publicKey, members, expense, existingSplits])
 
   // Generate / clean up local preview URL for the picked receipt file.
   useEffect(() => {
@@ -88,6 +146,11 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
     setShares({})
     setSplitMode('equal')
     setPayerWallet('')
+    setEmoji(null)
+    setReceiptFile(null)
+    setReceiptPreview(null)
+    setExistingReceiptUrl(null)
+    setReceiptRemoved(false)
     setSubmitting(false)
   }
 
@@ -153,6 +216,51 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
 
     try {
       setSubmitting(true)
+
+      if (isEditMode && expense) {
+        // ----- EDIT MODE -----
+        // Compute final receipt value:
+        //   - new file picked → upload, use new URL
+        //   - user explicitly removed → null (clear)
+        //   - otherwise → undefined (leave existing untouched)
+        let receiptUrlArg: string | null | undefined = undefined
+        if (receiptFile) {
+          try {
+            setUploadingReceipt(true)
+            receiptUrlArg = await uploadReceipt({ groupId, file: receiptFile })
+          } catch (uploadErr) {
+            console.error(uploadErr)
+            toast.error('Receipt upload failed — saving without changing receipt.')
+            receiptUrlArg = undefined
+          } finally {
+            setUploadingReceipt(false)
+          }
+        } else if (receiptRemoved) {
+          receiptUrlArg = null
+        }
+
+        // Always pass `splits` (possibly empty {}) so the server clears or replaces
+        // the custom splits to match the chosen split mode.
+        const splitsForUpdate: Record<string, number> =
+          splitMode === 'custom' && splitsArg ? splitsArg : {}
+
+        await updateExpense(expense.id, {
+          groupId,
+          payerWallet,
+          amountCents: totalCents,
+          description: trimmedDesc,
+          splits: splitsForUpdate,
+          receiptUrl: receiptUrlArg,
+          emoji,
+          actorWallet: publicKey.toBase58(),
+        })
+        toast.success('Expense updated')
+        reset()
+        onAdded()
+        return
+      }
+
+      // ----- ADD MODE -----
       let receiptUrl: string | null = null
       if (receiptFile) {
         try {
@@ -179,8 +287,8 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
       reset()
       onAdded()
     } catch (err) {
-      logError('addExpense failed', err)
-      toast.error(friendlyError(err, 'Failed to add expense'))
+      logError(isEditMode ? 'updateExpense failed' : 'addExpense failed', err)
+      toast.error(friendlyError(err, isEditMode ? 'Failed to update expense' : 'Failed to add expense'))
       setSubmitting(false)
     }
   }
@@ -197,6 +305,8 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
       return
     }
     setReceiptFile(file)
+    // Picking a new file supersedes any prior "remove" intent
+    setReceiptRemoved(false)
   }
 
   return (
@@ -211,7 +321,9 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
     >
       <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-display text-3xl">Add an expense</DialogTitle>
+          <DialogTitle className="font-display text-3xl">
+            {isEditMode ? 'Edit expense' : 'Add an expense'}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -382,13 +494,52 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
                   <XIcon className="h-4 w-4" />
                 </button>
               </div>
+            ) : isEditMode && existingReceiptUrl && !receiptRemoved ? (
+              <div className="relative rounded-lg overflow-hidden border border-foreground/15">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={existingReceiptUrl}
+                  alt="Existing receipt"
+                  className="block w-full max-h-56 object-cover"
+                />
+                <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                  <label
+                    htmlFor="receipt-input"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-full bg-foreground/80 px-3 text-xs text-background hover:bg-foreground cursor-pointer"
+                    title="Replace receipt"
+                  >
+                    <Camera className="h-3.5 w-3.5" />
+                    Replace
+                    <input
+                      id="receipt-input"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleReceiptPick}
+                      disabled={submitting}
+                      className="sr-only"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setReceiptRemoved(true)}
+                    disabled={submitting}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-foreground/80 text-background hover:bg-foreground"
+                    title="Remove receipt"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
             ) : (
               <label
                 htmlFor="receipt-input"
                 className="flex items-center gap-3 rounded-lg border border-dashed border-foreground/20 bg-background/50 px-3 py-3 text-sm cursor-pointer hover:border-foreground/40 transition-colors"
               >
                 <Camera className="h-4 w-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Add a receipt photo (optional)</span>
+                <span className="text-muted-foreground">
+                  {isEditMode && receiptRemoved ? 'Add a different receipt (optional)' : 'Add a receipt photo (optional)'}
+                </span>
                 <input
                   id="receipt-input"
                   type="file"
@@ -414,8 +565,12 @@ export function AddExpenseDialog({ open, onOpenChange, groupId, members, onAdded
               {uploadingReceipt
                 ? 'Uploading receipt…'
                 : submitting
-                  ? 'Adding…'
-                  : 'Add expense'}
+                  ? isEditMode
+                    ? 'Saving…'
+                    : 'Adding…'
+                  : isEditMode
+                    ? 'Save changes'
+                    : 'Add expense'}
             </Button>
           </DialogFooter>
         </form>

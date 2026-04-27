@@ -50,8 +50,13 @@ create table if not exists public.expenses (
   description text not null,
   receipt_url text,                           -- v4
   emoji text,                                 -- v6
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz                      -- v8: full expense edit
 );
+
+-- v8 migration for existing databases: adds the updated_at column used by
+-- the full edit-expense feature. Safe to re-run.
+alter table public.expenses add column if not exists updated_at timestamptz;
 
 -- settlements: onchain transfers that cleared a debt
 create table if not exists public.settlements (

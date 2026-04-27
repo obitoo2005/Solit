@@ -310,6 +310,8 @@ export function GroupDetailFeature({ groupId }: { groupId: string }) {
             members={members}
             myWallet={myWallet}
             commentCounts={commentCounts}
+            splitsByExpense={splitsByExpense}
+            groupId={group.id}
             onChanged={refresh}
           />
         </div>

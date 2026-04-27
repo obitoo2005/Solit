@@ -25,6 +25,11 @@ export type Expense = {
   receipt_url: string | null
   emoji: string | null
   created_at: string
+  /**
+   * Set when an expense is edited via {@link updateExpense}. Null for un-edited
+   * rows or rows created before the migration was applied.
+   */
+  updated_at?: string | null
 }
 
 export type ExpenseSplit = {
@@ -463,8 +468,110 @@ export async function joinGroupByInvite(inviteCode: string, wallet: string): Pro
 export async function updateExpenseDescription(expenseId: string, description: string): Promise<void> {
   const trimmed = description.trim()
   if (!trimmed) throw new Error('Description cannot be empty')
-  const { error } = await supabase.from('expenses').update({ description: trimmed }).eq('id', expenseId)
+  const { error } = await supabase
+    .from('expenses')
+    .update({ description: trimmed, updated_at: new Date().toISOString() })
+    .eq('id', expenseId)
   if (error) throw error
+}
+
+/**
+ * Full expense edit: updates the parent expense row and replaces any custom
+ * splits with the new ones. Splits are deleted then re-inserted because
+ * Supabase doesn't expose client-side multi-statement transactions.
+ *
+ * Receipt semantics:
+ *   - `receiptUrl: undefined`  → leave existing receipt untouched
+ *   - `receiptUrl: null`        → clear the receipt
+ *   - `receiptUrl: 'https://…'` → replace with new URL
+ *
+ * Splits semantics:
+ *   - `splits: undefined`       → keep existing splits as-is (no-op on splits)
+ *   - `splits: {}` or empty     → clear custom splits (fall back to equal split)
+ *   - `splits: { wallet: cents… }` → must sum to `amountCents`, replaces all
+ */
+export async function updateExpense(
+  expenseId: string,
+  input: {
+    groupId: string
+    payerWallet: string
+    amountCents: number
+    description: string
+    splits?: Record<string, number>
+    /** undefined = don't touch; null = clear; string = new URL */
+    receiptUrl?: string | null
+    emoji?: string | null
+    /** Wallet of the user performing the edit (for notifications). */
+    actorWallet: string
+  },
+): Promise<Expense> {
+  const trimmedDesc = input.description.trim()
+  if (!trimmedDesc) throw new Error('Description cannot be empty')
+  if (!Number.isFinite(input.amountCents) || input.amountCents <= 0) {
+    throw new Error('Amount must be greater than zero')
+  }
+
+  // Validate split totals BEFORE any DB writes so we don't end up in a partial state.
+  if (input.splits && Object.keys(input.splits).length > 0) {
+    const sum = Object.values(input.splits).reduce((a, b) => a + b, 0)
+    if (sum !== input.amountCents) {
+      throw new Error(
+        `Split shares (${sum}\u00a2) must equal expense amount (${input.amountCents}\u00a2).`,
+      )
+    }
+  }
+
+  // Build update payload — only include receipt_url if explicitly set/cleared.
+  const updatePayload: Record<string, unknown> = {
+    payer_wallet: input.payerWallet,
+    amount_cents: input.amountCents,
+    description: trimmedDesc,
+    emoji: input.emoji ?? null,
+    updated_at: new Date().toISOString(),
+  }
+  if (input.receiptUrl !== undefined) {
+    updatePayload.receipt_url = input.receiptUrl
+  }
+
+  const { data, error } = await supabase
+    .from('expenses')
+    .update(updatePayload)
+    .eq('id', expenseId)
+    .select()
+    .single()
+  if (error || !data) throw error ?? new Error('Failed to update expense')
+
+  // Replace splits if the caller passed `splits` (even an empty object means "clear").
+  if (input.splits !== undefined) {
+    const { error: delErr } = await supabase
+      .from('expense_splits')
+      .delete()
+      .eq('expense_id', expenseId)
+    if (delErr) throw delErr
+
+    if (Object.keys(input.splits).length > 0) {
+      const rows = Object.entries(input.splits).map(([wallet, share_cents]) => ({
+        expense_id: expenseId,
+        wallet,
+        share_cents,
+      }))
+      const { error: insErr } = await supabase.from('expense_splits').insert(rows)
+      if (insErr) throw insErr
+    }
+  }
+
+  // Best-effort notify other group members of the edit
+  const usd = (input.amountCents / 100).toFixed(2)
+  notifyGroup({
+    groupId: input.groupId,
+    actorWallet: input.actorWallet,
+    kind: 'expense_edited',
+    title: `${input.emoji ? input.emoji + ' ' : ''}Edited: $${usd}`,
+    body: trimmedDesc,
+    link: `/groups/${input.groupId}`,
+  })
+
+  return data as Expense
 }
 
 export async function deleteExpense(expenseId: string): Promise<void> {
