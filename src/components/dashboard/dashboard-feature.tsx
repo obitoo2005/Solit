@@ -59,9 +59,8 @@ export function DashboardFeature() {
                 <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
               </div>
               <span className="font-mono-tight text-[11px] uppercase tracking-wider text-zinc-400">
-                solit · goa trip
+                solit
               </span>
-              <span className="font-mono-tight text-[11px] text-zinc-500">devnet</span>
             </div>
 
             <motion.div
