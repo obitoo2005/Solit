@@ -2,7 +2,7 @@
 
 import { useWallet } from '@solana/wallet-adapter-react'
 import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
-import { RefreshCw, AlertCircle, X, Check, Copy, ExternalLink } from 'lucide-react'
+import { RefreshCw, AlertCircle, X, Check, Copy } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -22,6 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { AppModal } from '@/components/app-modal'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { QRCodeSVG } from 'qrcode.react'
 
 export function AccountBalance({ address }: { address: PublicKey }) {
   const query = useGetBalance({ address })
@@ -119,13 +120,11 @@ export function AccountBalanceCheck({ address }: { address: PublicKey }) {
 }
 
 export function AccountButtons({ address }: { address: PublicKey }) {
-  const { cluster } = useCluster()
   return (
     <div>
       <div className="space-x-2">
-        {cluster.network?.includes('mainnet') ? null : <ModalAirdrop address={address} />}
+        <ModalAirdrop address={address} />
         <ModalSend address={address} />
-        <ModalReceive address={address} />
       </div>
     </div>
   )
@@ -306,8 +305,7 @@ function BalanceSol({ balance }: { balance: number }) {
   return <span>{Math.round((balance / LAMPORTS_PER_SOL) * 100000) / 100000}</span>
 }
 
-function ModalReceive({ address }: { address: PublicKey }) {
-  const { getExplorerUrl } = useCluster()
+function ModalAirdrop({ address }: { address: PublicKey }) {
   const addr = address.toString()
   const [copied, setCopied] = useState(false)
 
@@ -326,61 +324,24 @@ function ModalReceive({ address }: { address: PublicKey }) {
   return (
     <AppModal title="Receive">
       <p className="text-sm text-muted-foreground">
-        Send SOL or any SPL token to this address. It belongs to your connected wallet.
+        Share this address or QR code to receive SOL or any SPL token.
       </p>
-      <div className="rounded-lg border border-foreground/10 bg-muted/40 p-3 break-all font-mono text-xs select-all">
+      <div className="flex justify-center">
+        <div className="rounded-lg border border-foreground/10 bg-white p-3">
+          <QRCodeSVG value={addr} size={180} level="M" includeMargin={false} />
+        </div>
+      </div>
+      <div className="rounded-lg border border-foreground/10 bg-muted/40 p-3 break-all font-mono text-xs select-all text-center">
         {addr}
       </div>
-      <div className="flex flex-col sm:flex-row gap-2">
-        <Button
-          variant="default"
-          onClick={handleCopy}
-          className="flex-1 inline-flex items-center justify-center gap-2"
-        >
-          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-          {copied ? 'Copied' : 'Copy address'}
-        </Button>
-        <Button
-          variant="outline"
-          asChild
-          className="flex-1 inline-flex items-center justify-center gap-2"
-        >
-          <a
-            href={getExplorerUrl(`account/${addr}`)}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <ExternalLink className="h-4 w-4" />
-            View on Solscan
-          </a>
-        </Button>
-      </div>
-    </AppModal>
-  )
-}
-
-function ModalAirdrop({ address }: { address: PublicKey }) {
-  const mutation = useRequestAirdrop({ address })
-  const [amount, setAmount] = useState('2')
-
-  return (
-    <AppModal
-      title="Airdrop"
-      submitDisabled={!amount || mutation.isPending}
-      submitLabel="Request Airdrop"
-      submit={() => mutation.mutateAsync(parseFloat(amount))}
-    >
-      <Label htmlFor="amount">Amount (SOL)</Label>
-      <Input
-        disabled={mutation.isPending}
-        id="amount"
-        min="1"
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder="Amount"
-        step="any"
-        type="number"
-        value={amount}
-      />
+      <Button
+        variant="default"
+        onClick={handleCopy}
+        className="w-full inline-flex items-center justify-center gap-2"
+      >
+        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+        {copied ? 'Copied' : 'Copy address'}
+      </Button>
     </AppModal>
   )
 }
