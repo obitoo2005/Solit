@@ -8,7 +8,6 @@ exactly how much, and a single click sends real money to their wallet in under a
 Owe three people? *One signature, one atomic transaction* clears them all.
 
 > Built for the [Solana Frontier Hackathon](https://www.colosseum.com/frontier)
-> with the help of the [Superteam Agentic Engineering Grant](https://earn.superteam.fun/listing/agentic-engineering-grants).
 
 ---
 
